@@ -27,7 +27,7 @@ jobs:
     if: github.event.pull_request.head.repo.fork != true
     uses: ./.github/workflows/_build-image.yml
     with:
-      image: ghcr.io/openhands/openhands
+      image: ghcr.io/fvegiard/openhands
       dockerfile: containers/app/Dockerfile
 
   build_enterprise:
@@ -36,7 +36,7 @@ jobs:
     needs: build_app
     uses: ./.github/workflows/_build-image.yml
     with:
-      image: ghcr.io/openhands/enterprise-server
+      image: ghcr.io/fvegiard/enterprise-server
       dockerfile: enterprise/Dockerfile
       extra-build-args: OPENHANDS_VERSION=sha-${{ github.event.pull_request.head.sha || github.sha }}
       provenance: true
