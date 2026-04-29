@@ -741,7 +741,7 @@ async def batch_get_app_conversation_start_tasks(
     """Get a batch of start app conversation tasks given their ids. Return None for any missing."""
     if len(ids) > 100:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Cannot request more than 100 start tasks at once, got {len(ids)}',
         )
     start_tasks = await app_conversation_start_task_service.batch_get_app_conversation_start_tasks(
@@ -1120,10 +1120,11 @@ async def export_conversation(
             },
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f'Failed to download trajectory: {str(e)}'
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'Failed to download trajectory: {str(e)}',
         )
 
 
