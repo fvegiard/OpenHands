@@ -25,7 +25,8 @@ RUN mise install node@26 python@3.14 pnpm@latest || true
 RUN pip install --no-cache-dir langchain langchain-anthropic openai whisper-cpp-pybind || true
 
 WORKDIR /workspace
-COPY entrypoint.sh /usr/local/bin/quantum-entrypoint
+# Build context is the quantum-agent/ directory (see .github/workflows/quantum.yml).
+COPY docker/entrypoint.sh /usr/local/bin/quantum-entrypoint
 RUN chmod +x /usr/local/bin/quantum-entrypoint
 
 EXPOSE 8765
