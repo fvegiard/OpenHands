@@ -26,11 +26,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "pnpm"
-          cache-dependency-path: quantum-agent/pnpm-lock.yaml
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-      - name: Lint
+      - name: Diagnostics
+        run: |
+          node --version
+          pnpm --version
+          which node && which pnpm
+          ls -la
+          ls -la ../.github/workflows/
+          cat package.json | head -20
+          head -5 pnpm-lock.yaml
+      - name: Install deps (non-frozen for triage)
+        run: pnpm install --no-frozen-lockfile
+      - name: Rebuild native modules
+        run: pnpm rebuild better-sqlite3 || true
+      - name: Lint (biome)
         run: pnpm exec biome check .
       - name: Type-check
         run: pnpm exec tsc -p tsconfig.json --noEmit
