@@ -4,7 +4,7 @@
 [tools]
 node    = "26"
 python  = "3.14"
-pnpm    = "latest"
+pnpm    = "10.18.2"   # pinned: pnpm 11 exits non-zero on ignored builds under CI
 biome   = "latest"
 deno    = "latest"
 uv      = "latest"

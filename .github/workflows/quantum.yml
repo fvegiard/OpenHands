@@ -34,11 +34,11 @@ jobs:
           install_dir: ${{ github.workspace }}/quantum-agent
           working_directory: quantum-agent
 
-      - name: Activate pnpm 10 via corepack
+      - name: Verify toolchain (mise should provide pnpm 10.18.2)
         run: |
-          corepack enable pnpm
-          corepack prepare pnpm@10.18.2 --activate
+          which pnpm
           pnpm --version
+          node --version
 
       - name: pnpm install (resolves fresh; lockfile is from an earlier toolchain)
         run: pnpm install --no-frozen-lockfile
