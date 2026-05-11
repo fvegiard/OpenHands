@@ -1,15 +1,17 @@
 // Entangled blackboard: SQLite-backed shared state for all subagents,
 // plus session/transcript persistence so `quantum chat --resume last` works.
+//
+// Uses Node 26's built-in `node:sqlite` — no native build step needed.
 
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { getPaths } from "./config.ts";
 
-let _db: Database.Database | null = null;
+let _db: DatabaseSync | null = null;
 
-export function db(): Database.Database {
+export function db(): DatabaseSync {
   if (_db) return _db;
-  _db = new Database(getPaths().blackboard);
-  _db.pragma("journal_mode = WAL");
+  _db = new DatabaseSync(getPaths().blackboard);
+  _db.exec("PRAGMA journal_mode = WAL");
   _db.exec(`
     CREATE TABLE IF NOT EXISTS facts (
       id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +69,7 @@ export function recall(query: string, ns = "default", limit = 10): Fact[] {
     "SELECT * FROM facts WHERE ns = ? AND (key LIKE ? OR value LIKE ?) ORDER BY created DESC LIMIT ?",
   );
   const like = `%${query}%`;
-  return stmt.all(ns, like, like, limit) as Fact[];
+  return stmt.all(ns, like, like, limit) as unknown as Fact[];
 }
 
 export function lastSession(): string | null {

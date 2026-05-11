@@ -18,7 +18,7 @@ function recentFindings(limit = 10): Row[] {
   try {
     return db()
       .prepare("SELECT task, branch, kind, ts FROM bb_findings ORDER BY ts DESC LIMIT ?")
-      .all(limit) as Row[];
+      .all(limit) as unknown as Row[];
   } catch {
     return [];
   }

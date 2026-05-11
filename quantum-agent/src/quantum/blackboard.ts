@@ -42,7 +42,7 @@ export class Blackboard {
           .prepare("SELECT * FROM bb_findings WHERE task = ? AND branch = ? ORDER BY ts ASC")
           .all(this.task, branch)
       : db().prepare("SELECT * FROM bb_findings WHERE task = ? ORDER BY ts ASC").all(this.task);
-    return rows as Finding[];
+    return rows as unknown as Finding[];
   }
 
   branches(): string[] {
