@@ -1,7 +1,7 @@
 // Live TUI dashboard — Ink + React. Shows installed agents/skills and
 // live blackboard activity. Read-only view; interactive run via CLI.
 
-import { Box, Text, render } from "ink";
+import { Box, render, Text } from "ink";
 import type React from "react";
 import { listAgents } from "../agents/registry.ts";
 import { db } from "../memory.ts";

@@ -2,7 +2,7 @@
 // inside .quantum/cache/. Selective purge via `quantum cache clear`.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPaths } from "../config.ts";
 
