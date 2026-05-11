@@ -34,14 +34,17 @@ jobs:
           install_dir: ${{ github.workspace }}/quantum-agent
           working_directory: quantum-agent
 
-      - name: Verify toolchain (mise should provide pnpm 10.18.2)
+      - name: Verify toolchain
         run: |
-          which pnpm
-          pnpm --version
-          node --version
+          which pnpm && pnpm --version
+          which node && node --version
+          which biome 2>/dev/null && biome --version || true
 
-      - name: pnpm install (resolves fresh; lockfile is from an earlier toolchain)
-        run: pnpm install --no-frozen-lockfile
+      - name: pnpm install (skip postinstall scripts; rebuild explicitly after)
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: pnpm rebuild better-sqlite3
 
       - name: Lint (biome)
         run: ./node_modules/.bin/biome check .
