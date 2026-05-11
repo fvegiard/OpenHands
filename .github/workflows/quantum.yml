@@ -34,10 +34,13 @@ jobs:
           install_dir: ${{ github.workspace }}/quantum-agent
           working_directory: quantum-agent
 
-      - name: Enable corepack pnpm
-        run: corepack enable pnpm && pnpm --version
+      - name: Activate pnpm 10 via corepack
+        run: |
+          corepack enable pnpm
+          corepack prepare pnpm@10.18.2 --activate
+          pnpm --version
 
-      - name: pnpm install (resolves fresh; the on-disk lockfile is from a previous Node version)
+      - name: pnpm install (resolves fresh; lockfile is from an earlier toolchain)
         run: pnpm install --no-frozen-lockfile
 
       - name: Lint (biome)
