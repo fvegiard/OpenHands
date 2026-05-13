@@ -6,7 +6,6 @@ import { Command } from "commander";
 import { runAgent } from "./agent.ts";
 import { listAgents } from "./agents/registry.ts";
 import { resolveAuth } from "./auth.ts";
-import { selfheal } from "./automation/selfheal.ts";
 import { watch } from "./automation/watcher.ts";
 import * as cache from "./cache/index.ts";
 import { lastSession } from "./memory.ts";

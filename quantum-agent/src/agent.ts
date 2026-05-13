@@ -88,8 +88,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   // point researching if we're returning a mock response anyway) and when
   // websearch isn't explicitly disabled.
   let effectivePrompt = prompt;
-  const autoSearchDisabled =
-    opts.noAutoSearch || process.env.QUANTUM_DISABLE_AUTOSEARCH === "1";
+  const autoSearchDisabled = opts.noAutoSearch || process.env.QUANTUM_DISABLE_AUTOSEARCH === "1";
   if (!autoSearchDisabled && !opts.quantum && auth.mode !== "mock" && sdk) {
     const intent = classify(prompt);
     if (intent.intent === "fix" || intent.intent === "implement") {
