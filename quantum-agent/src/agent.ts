@@ -6,10 +6,13 @@ import { type AuthResult, resolveAuth } from "./auth.ts";
 import { DEFAULT_MODEL } from "./config.ts";
 import { buildHooks } from "./hooks.ts";
 import { appendTranscript, touchSession } from "./memory.ts";
+import { buildCanUseTool } from "./permissions.ts";
 import { classify } from "./quantum/intent.ts";
 import { type BranchOutcome, runQuantum } from "./quantum/loop.ts";
+import { reflect } from "./quantum/reflect.ts";
 import { buildQuantumToolset } from "./tools/index.ts";
 import { autoWebSearch } from "./tools/web.ts";
+import { getWorkflow } from "./workflows/index.ts";
 
 export interface RunOptions {
   resume?: string;
@@ -83,6 +86,31 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   touchSession(sessionId);
   appendTranscript(sessionId, "user", prompt);
 
+  // Workflow routing: opt-in canned end-to-end flow. We dispatch and wrap
+  // each step's result before returning, then reflect on the aggregate.
+  if (opts.workflow) {
+    const wf = getWorkflow(opts.workflow);
+    if (!wf) {
+      const text = `[error] unknown workflow: ${opts.workflow}`;
+      appendTranscript(sessionId, "assistant", text);
+      return { text, sessionId, auth: auth.mode, mock: !sdk || auth.mode === "mock" };
+    }
+    const result = await wf({
+      prompt,
+      sessionId,
+      runAgent: (p, o) => runAgent(p, { ...opts, ...o, workflow: undefined }),
+    });
+    const summary = [
+      `# Workflow: ${result.workflow} (${result.ok ? "ok" : "failed"})`,
+      ...result.steps.map((s) => `- ${s.step}: ${s.ok ? "✓" : "✗"} ${s.summary}`),
+      "",
+      result.finalText,
+    ].join("\n");
+    appendTranscript(sessionId, "assistant", summary);
+    reflect(sessionId, `workflow:${result.workflow}`, summary);
+    return { text: summary, sessionId, auth: auth.mode, mock: !sdk || auth.mode === "mock" };
+  }
+
   // autowebsearch: for coding-intent prompts, prime the agent with fresh 2026
   // results before any code is written. Only runs when we have real auth (no
   // point researching if we're returning a mock response anyway) and when
@@ -110,6 +138,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
     const winner = result.measurement.winner?.conclusions[0] ?? "(no conclusion)";
     const text = `# Quantum result\nIntent: ${result.routing.intent}\nBranches: ${result.measurement.totalBranches}\nTunneled: ${result.tunneled}\n\nWinner:\n${winner}`;
     appendTranscript(sessionId, "assistant", text);
+    reflect(sessionId, prompt.slice(0, 200), text);
     return { text, sessionId, auth: auth.mode, mock: !sdk || auth.mode === "mock" };
   }
 
@@ -119,6 +148,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
       if (msg.type === "assistant") combined += msg.message.content[0].text;
     }
     appendTranscript(sessionId, "assistant", combined);
+    reflect(sessionId, prompt.slice(0, 200), combined);
     return { text: combined, sessionId, auth: auth.mode, mock: true };
   }
 
@@ -134,6 +164,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
       model: opts.model ?? DEFAULT_MODEL,
       mcpServers,
       hooks: buildHooks(),
+      canUseTool: buildCanUseTool(),
       permissionMode: "auto",
       includePartialMessages: true,
       maxBudgetUsd: opts.maxBudgetUsd ?? 5,
@@ -161,5 +192,6 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
     }
   }
   appendTranscript(sessionId, "assistant", combined);
+  reflect(sessionId, prompt.slice(0, 200), combined);
   return { text: combined, sessionId, auth: auth.mode, mock: false };
 }

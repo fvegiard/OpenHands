@@ -16,6 +16,7 @@ import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skill
 import { install, listInstalled, searchInstalled, translateSkill } from "./skills/manager.ts";
 import { startTui } from "./tui/app.tsx";
 import { verifyReadme } from "./verify.ts";
+import { listWorkflows } from "./workflows/index.ts";
 
 const program = new Command("quantum")
   .description("The most advanced personal AI agent — quantum loop on the Claude Agent SDK.")
@@ -171,6 +172,25 @@ skill.command("new <description...>").action((parts: string[]) => {
   const file = generateSkill(description);
   const after = verifyAfter();
   console.log(`wrote ${file.path} (${file.bytes} bytes); verify=${after.ok ? "ok" : "drift"}`);
+});
+
+const workflow = program
+  .command("workflow")
+  .description(
+    "Canned end-to-end flows (issue-to-pr, pr-review-merge, bug-repro-fix, rfc-hyperplan).",
+  );
+workflow.command("list").action(() => {
+  for (const w of listWorkflows()) console.log(`- ${w.name}: ${w.description}`);
+});
+workflow.command("run <name> <prompt...>").action(async (name: string, parts: string[]) => {
+  const prompt = parts.join(" ").trim();
+  if (!prompt) {
+    console.error(`usage: quantum workflow run ${name} <prompt>`);
+    process.exitCode = 2;
+    return;
+  }
+  const r = await runAgent(prompt, { workflow: name });
+  console.log(r.text);
 });
 
 program
