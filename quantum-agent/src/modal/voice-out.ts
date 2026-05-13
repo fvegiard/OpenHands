@@ -1,16 +1,29 @@
-// Voice out — bridges to piper (when present) for offline TTS.
+// Voice-out: speak text with Piper (Linux/Windows) or macOS `say`. Returns
+// the audio file path on success, or a status message on failure. Never throws.
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execa } from "execa";
 
-export async function speak(text: string, outPath = "/tmp/quantum-voice.wav"): Promise<string> {
+export async function speak(text: string): Promise<string> {
+  const dir = mkdtempSync(join(tmpdir(), "quantum-tts-"));
+  const out = join(dir, "out.wav");
   try {
-    await execa("piper", ["--output_file", outPath], {
+    const piper = await execa("piper", ["--output_file", out], {
       input: text,
-      timeout: 60_000,
+      timeout: 30_000,
       reject: false,
     });
-    return outPath;
+    if (piper.exitCode === 0) return out;
   } catch {
-    return "[piper not available — text would have been spoken]";
+    // fall through
   }
+  try {
+    const say = await execa("say", ["-o", out, text], { timeout: 30_000, reject: false });
+    if (say.exitCode === 0) return out;
+  } catch {
+    // fall through
+  }
+  return "[voice-out] piper / say not available — text would have been spoken";
 }

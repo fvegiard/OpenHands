@@ -13,6 +13,7 @@ import { lastSession } from "./memory.ts";
 import { see } from "./modal/vision.ts";
 import { transcribe } from "./modal/voice-in.ts";
 import { start as startServer } from "./server.ts";
+import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skills/generate.ts";
 import { install, listInstalled, searchInstalled, translateSkill } from "./skills/manager.ts";
 import { startTui } from "./tui/app.tsx";
 import { verifyReadme } from "./verify.ts";
@@ -162,31 +163,49 @@ skill
     console.log(translateSkill(name, opts.to as any));
   });
 skill.command("new <description...>").action((parts: string[]) => {
-  console.log(`(meta-skill: would draft a SKILL.md from "${parts.join(" ")}")`);
+  const description = parts.join(" ");
+  if (!description) {
+    console.error("usage: quantum skill new <description>");
+    process.exitCode = 2;
+    return;
+  }
+  const file = generateSkill(description);
+  const after = verifyAfter();
+  console.log(`wrote ${file.path} (${file.bytes} bytes); verify=${after.ok ? "ok" : "drift"}`);
 });
 
 program
-  .command("agent <action> [name]")
+  .command("agent <action> [name] [description...]")
   .description("Manage specialist agents.")
-  .action((action: string, name?: string) => {
+  .action((action: string, name?: string, parts: string[] = []) => {
     if (action === "list") {
       for (const a of listAgents()) console.log(`- ${a.name} [${a.source}]: ${a.description}`);
-    } else if (action === "new" && name) {
-      console.log(`(meta-agent: would draft agents/${name}.md)`);
-    } else {
-      console.log("usage: quantum agent <list|new <name>>");
+      return;
     }
+    if (action === "new" && name) {
+      const description = parts.join(" ") || `${name} specialist agent`;
+      const file = generateAgent(name, description);
+      console.log(`wrote ${file.path} (${file.bytes} bytes)`);
+      return;
+    }
+    console.log("usage: quantum agent <list|new <name> [description...]>");
   });
 
 program
-  .command("tool <action> [name]")
+  .command("tool <action> [name] [description...]")
   .description("Manage custom MCP tools.")
-  .action((action: string) => {
+  .action((action: string, name?: string, parts: string[] = []) => {
     if (action === "list") {
       console.log("- bash, fetch, grep, read, remember, recall");
-    } else {
-      console.log("usage: quantum tool <list|new <name>>");
+      return;
     }
+    if (action === "new" && name) {
+      const description = parts.join(" ") || `${name} tool`;
+      const file = generateTool(name, description);
+      console.log(`wrote ${file.path} (${file.bytes} bytes)`);
+      return;
+    }
+    console.log("usage: quantum tool <list|new <name> [description...]>");
   });
 
 const cacheCmd = program.command("cache").description("Inspect / clear the cache.");
@@ -205,12 +224,32 @@ cacheCmd
 program
   .command("autoupdate")
   .description("Bump deps + mise + skill indexes; prints what would change.")
-  .action(async () => {
-    const r = await selfheal({
-      command: "pnpm up -L --silent",
-      maxAttempts: 1,
-    });
-    console.log(JSON.stringify(r, null, 2));
+  .option("--apply", "actually apply changes (default is dry-run)")
+  .action(async (opts: { apply?: boolean }) => {
+    const mode = opts.apply ? "apply" : "dry-run";
+    const commands = [
+      ["pnpm", ["outdated", "--format", "list"]],
+      ["mise", ["outdated"]],
+    ] as [string, string[]][];
+    const results: Record<string, string> = {};
+    const { execa } = await import("execa");
+    for (const [cmd, args] of commands) {
+      try {
+        const r = await execa(cmd, args, { reject: false, timeout: 60_000 });
+        results[`${cmd} ${args[0]}`] = r.stdout.trim() || "(nothing)";
+      } catch {
+        results[`${cmd} ${args[0]}`] = `[${cmd} not installed]`;
+      }
+    }
+    if (opts.apply) {
+      try {
+        await execa("pnpm", ["up", "-L", "--silent"], { reject: false, timeout: 300_000 });
+        results["pnpm up"] = "applied";
+      } catch (err) {
+        results["pnpm up"] = (err as Error).message;
+      }
+    }
+    console.log(JSON.stringify({ mode, results }, null, 2));
   });
 
 program.parseAsync().catch((err) => {
