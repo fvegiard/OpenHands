@@ -53,7 +53,7 @@ quantum skill install gh:owner/repo
 quantum skill install --pack openclaw-essentials      # +5400
 quantum skill install --pack claude-code-essentials   # +30
 quantum skill list
-quantum skill translate --to openclaw
+quantum skill translate hyperplan --to openclaw
 quantum skill new "summarise PRs nightly to slack"    # meta-skill writes a new skill
 ```
 
@@ -129,8 +129,11 @@ quantum cache status
 
 ## Verify
 
-`quantum verify` parses every fenced bash block in this README and runs
-each one against a mocked SDK transport. Drift fails CI.
+`quantum verify` parses every fenced bash block in this README and
+validates that each command head is a known `quantum` subcommand (or a
+well-known external like `mise`, `pnpm`, `docker`, `git`, `claude`,
+`curl`). Unknown commands fail the gate so the README never drifts from
+the implemented CLI.
 
 ```bash
 mise run green       # lint + test + verify

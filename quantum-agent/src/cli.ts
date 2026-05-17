@@ -43,11 +43,11 @@ program
 program
   .command("init")
   .description("Pull default skill packs from configured sources.")
-  .action(async () => {
-    console.log(
-      "Pulling default packs (claude-code-essentials, alirezarezvani-engineering, quantum-core)…",
-    );
-    console.log("(Network-dependent; offline-safe — placeholders are written when unreachable.)");
+  .option("--pack <name>", "specific pack name (default: 'default')", "default")
+  .action(async (opts: { pack: string }) => {
+    console.log(`Pulling skill pack: ${opts.pack}…`);
+    const r = await install(`pack:${opts.pack}`);
+    console.log(JSON.stringify(r, null, 2));
   });
 
 program
@@ -100,10 +100,17 @@ program
   });
 
 program
-  .command("listen <audioPath>")
-  .description("Transcribe audio with whisper.cpp.")
-  .action(async (path: string) => {
-    console.log(await transcribe(path));
+  .command("listen [audioPath]")
+  .description("Voice input — transcribe an audio file or start a live loop.")
+  .action(async (path?: string) => {
+    if (path) {
+      console.log(await transcribe(path));
+      return;
+    }
+    console.log(
+      "[voice-in] live loop is not yet implemented; pass an audio file path or pipe one in.",
+    );
+    console.log("  example: quantum listen ./recording.wav");
   });
 
 program
@@ -152,10 +159,19 @@ skill.command("search <query>").action((q: string) => {
   for (const s of searchInstalled(q))
     console.log(`- ${s.frontmatter.name}: ${s.frontmatter.description}`);
 });
-skill.command("install <spec>").action(async (spec: string) => {
-  const r = await install(spec);
-  console.log(JSON.stringify(r, null, 2));
-});
+skill
+  .command("install [spec]")
+  .option("--pack <name>", "install a curated pack (resolved via skills.sources.toml)")
+  .action(async (spec: string | undefined, opts: { pack?: string }) => {
+    if (!spec && !opts.pack) {
+      console.error("usage: quantum skill install <gh:owner/repo|pack:name>  OR  --pack <name>");
+      process.exitCode = 2;
+      return;
+    }
+    const effective = opts.pack ? `pack:${opts.pack}` : (spec as string);
+    const r = await install(effective);
+    console.log(JSON.stringify(r, null, 2));
+  });
 skill
   .command("translate <name>")
   .option("--to <fmt>", "target format", "openclaw")

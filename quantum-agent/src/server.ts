@@ -6,6 +6,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { runAgent } from "./agent.ts";
 import { listAgents } from "./agents/registry.ts";
+import { recall, remember } from "./memory.ts";
 import { listInstalled } from "./skills/manager.ts";
 
 export interface ServeOptions {
@@ -62,6 +63,21 @@ export function buildApp(opts: ServeOptions): Hono {
           return c.json({ agents: listAgents() });
         case "quantum.list_skills":
           return c.json({ skills: listInstalled().map((s) => s.frontmatter) });
+        case "quantum.recall": {
+          const query = String(body.query ?? "");
+          const ns = body.ns ? String(body.ns) : undefined;
+          const limit = Number.isFinite(body.limit) ? Number(body.limit) : undefined;
+          return c.json({ facts: recall(query, ns, limit) });
+        }
+        case "quantum.remember": {
+          const key = String(body.key ?? "");
+          const value = String(body.value ?? "");
+          if (!key || !value) return c.json({ error: "key and value required" }, 400);
+          const ns = body.ns ? String(body.ns) : undefined;
+          const tags = Array.isArray(body.tags) ? body.tags.map(String) : undefined;
+          const id = remember(key, value, ns, tags);
+          return c.json({ id });
+        }
         default:
           return c.text(`unknown tool: ${tool}`, 404);
       }

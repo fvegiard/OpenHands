@@ -2,6 +2,7 @@
 // Falls back to a deterministic mock transport when no auth is available so
 // the build always proceeds (one-shot delivery contract).
 
+import { randomUUID } from "node:crypto";
 import { type AuthResult, resolveAuth } from "./auth.ts";
 import { DEFAULT_MODEL } from "./config.ts";
 import { buildHooks } from "./hooks.ts";
@@ -10,6 +11,7 @@ import { buildCanUseTool } from "./permissions.ts";
 import { classify } from "./quantum/intent.ts";
 import { type BranchOutcome, runQuantum } from "./quantum/loop.ts";
 import { reflect } from "./quantum/reflect.ts";
+import { loadSkillByName } from "./skills/manager.ts";
 import { buildQuantumToolset } from "./tools/index.ts";
 import { autoWebSearch } from "./tools/web.ts";
 import { getWorkflow } from "./workflows/index.ts";
@@ -79,12 +81,38 @@ function buildMcpServers(quantum: unknown): Record<string, unknown> {
   return servers;
 }
 
+/**
+ * Generate a collision-resistant session id. `--quantum` runs spawn branches
+ * in parallel; a bare `Date.now()` collides under that load, so we add a
+ * random UUID suffix.
+ */
+export function newSessionId(): string {
+  return `q-${Date.now()}-${randomUUID().slice(0, 8)}`;
+}
+
 export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<RunResult> {
   const auth = resolveAuth();
   const sdk = await loadSdk();
-  const sessionId = opts.resume ?? `q-${Date.now()}`;
+  const sessionId = opts.resume ?? newSessionId();
   touchSession(sessionId);
   appendTranscript(sessionId, "user", prompt);
+
+  // Skill routing: when --skill is supplied, prepend the loaded SKILL.md body
+  // to the prompt so the agent runs under that skill's instructions. A
+  // missing skill is recorded as a warning but never blocks the run.
+  let promptWithSkill = prompt;
+  if (opts.skill) {
+    const skill = loadSkillByName(opts.skill);
+    if (skill) {
+      promptWithSkill =
+        `# Skill: ${skill.manifest.frontmatter.name}\n` +
+        `${skill.manifest.frontmatter.description ?? ""}\n\n` +
+        `## Skill instructions\n${skill.body}\n\n` +
+        `## User task\n${prompt}`;
+    } else {
+      appendTranscript(sessionId, "system", `[warn] unknown skill: ${opts.skill}`);
+    }
+  }
 
   // Workflow routing: opt-in canned end-to-end flow. We dispatch and wrap
   // each step's result before returning, then reflect on the aggregate.
@@ -96,7 +124,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
       return { text, sessionId, auth: auth.mode, mock: !sdk || auth.mode === "mock" };
     }
     const result = await wf({
-      prompt,
+      prompt: promptWithSkill,
       sessionId,
       runAgent: (p, o) => runAgent(p, { ...opts, ...o, workflow: undefined }),
     });
@@ -115,14 +143,14 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   // results before any code is written. Only runs when we have real auth (no
   // point researching if we're returning a mock response anyway) and when
   // websearch isn't explicitly disabled.
-  let effectivePrompt = prompt;
+  let effectivePrompt = promptWithSkill;
   const autoSearchDisabled = opts.noAutoSearch || process.env.QUANTUM_DISABLE_AUTOSEARCH === "1";
   if (!autoSearchDisabled && !opts.quantum && auth.mode !== "mock" && sdk) {
     const intent = classify(prompt);
     if (intent.intent === "fix" || intent.intent === "implement") {
       const research = await autoWebSearch(prompt);
       if (research.results.length > 0) {
-        effectivePrompt = `${prompt}\n\n## Fresh 2026 research\n${research.results
+        effectivePrompt = `${promptWithSkill}\n\n## Fresh 2026 research\n${research.results
           .map((r, i) => `${i + 1}. ${r.title} — ${r.url}\n   ${r.snippet}`)
           .join("\n")}`;
       }

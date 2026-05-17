@@ -7,6 +7,8 @@ export interface BranchScore {
   branch: string;
   score: number;
   conclusions: string[];
+  /** Most recent timestamp across this branch's findings (ms since epoch). */
+  lastTs?: number;
 }
 
 function tokenize(s: string): Set<string> {
@@ -62,10 +64,15 @@ export function interfere(findings: Finding[]): BranchScore[] {
   }
 
   return [...byBranch.keys()]
-    .map((branch) => ({
-      branch,
-      score: scoreMap.get(branch) ?? 0,
-      conclusions: conclusions.filter((c) => c.branch === branch).map((c) => c.text),
-    }))
+    .map((branch) => {
+      const branchFindings = byBranch.get(branch) ?? [];
+      const lastTs = branchFindings.reduce((max, f) => (f.ts > max ? f.ts : max), 0);
+      return {
+        branch,
+        score: scoreMap.get(branch) ?? 0,
+        conclusions: conclusions.filter((c) => c.branch === branch).map((c) => c.text),
+        lastTs,
+      };
+    })
     .sort((a, b) => b.score - a.score);
 }
