@@ -4,8 +4,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execa } from "execa";
-import { discover, type SkillManifest } from "./loader.ts";
-import { findPack, type Pack, parseSources } from "./sources.ts";
+import { discover, loadBody, type SkillBody, type SkillManifest } from "./loader.ts";
+import { findPack, type Pack, parseSourcesFile } from "./sources.ts";
 import { translate, type TargetFormat } from "./translate.ts";
 
 const LOCAL_DIRS = ["./skills", "./skills-core"];
@@ -21,6 +21,12 @@ export function searchInstalled(query: string): SkillManifest[] {
       m.frontmatter.name?.toLowerCase().includes(q) ||
       m.frontmatter.description?.toLowerCase().includes(q),
   );
+}
+
+/** Load a skill (manifest + body) by its frontmatter `name`, or null. */
+export function loadSkillByName(name: string): SkillBody | null {
+  const m = listInstalled().find((s) => s.frontmatter.name === name);
+  return m ? loadBody(m) : null;
 }
 
 function ensureDir(dir: string): void {
@@ -59,11 +65,11 @@ async function installGh(spec: string, target: string): Promise<InstallResult> {
 }
 
 async function installPack(name: string, target: string): Promise<InstallResult> {
-  const externalPacks: Pack[] = [];
-  const sources = parseSources();
+  const { sources, packs: tomlPacks } = parseSourcesFile();
+  const externalPacks: Pack[] = [...tomlPacks];
   for (const s of sources) {
     if (s.type === "git" && s.url) {
-      const m = s.url.match(/github\.com\/([^\/]+\/[^\/]+?)(?:\.git)?$/i);
+      const m = s.url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/i);
       if (m?.[1]) externalPacks.push({ name: s.name, specs: [`gh:${m[1]}`] });
     }
   }
@@ -71,10 +77,17 @@ async function installPack(name: string, target: string): Promise<InstallResult>
   if (!pack) {
     return { installed: [], skipped: [name], notes: [`unknown pack: ${name}`] };
   }
+  // A pack spec can either be a concrete install spec (gh:.. / pack:..) or
+  // a reference to another pack name. Resolve up to one indirection level.
   const installed: string[] = [];
   const skipped: string[] = [];
   const notes: string[] = [];
-  for (const spec of pack.specs) {
+  for (const rawSpec of pack.specs) {
+    let spec = rawSpec;
+    if (!spec.startsWith("gh:") && !spec.startsWith("pack:")) {
+      const referenced = findPack(spec, externalPacks);
+      if (referenced) spec = `pack:${spec}`;
+    }
     const r = await install(spec, target);
     installed.push(...r.installed);
     skipped.push(...r.skipped);

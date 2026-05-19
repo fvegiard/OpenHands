@@ -1,6 +1,6 @@
-// Quantum tunneling — when the same losing branch wins twice in a row,
-// inject a contrarian "devil's advocate" hypothesis to escape the local
-// minimum.
+// Quantum tunneling — when the same winning branch keeps winning across
+// successive measurements (i.e. we're stuck in a local optimum), inject a
+// contrarian "devil's advocate" hypothesis to escape it.
 
 import type { Measurement } from "./measure.ts";
 

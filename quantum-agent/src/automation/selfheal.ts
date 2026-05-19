@@ -1,6 +1,8 @@
 // Self-heal: run a green-gate command; on red, diversify (different
-// strategy / model) and retry. No fixed retry cap — strategies are mined
-// from the blackboard so we never repeat the same losing approach.
+// strategy / model) and retry. The default attempt cap is 5; callers can
+// override via `maxAttempts` (or pass `Infinity` for unbounded retries).
+// Strategies are mined from the blackboard so we never repeat the same
+// losing approach within the configured budget.
 
 import { execa } from "execa";
 import { remember } from "../memory.ts";
