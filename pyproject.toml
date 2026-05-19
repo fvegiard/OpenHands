@@ -109,6 +109,8 @@ dependencies = [
 urls.Homepage = "https://github.com/OpenHands/OpenHands"
 urls.Repository = "https://github.com/OpenHands/OpenHands"
 
+scripts.openhands-mcp = "openhands.integrations.claude_desktop.mcp_stdio:main"
+
 [dependency-groups]
 dev = [
   "build",
