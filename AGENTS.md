@@ -479,3 +479,7 @@ Called by `workspace.get_llm()` in the SDK to retrieve LLM config with the API k
 - `openhands/sdk/llm/llm.py`: `LLM.api_key` accepts `SecretSource` (including `LookupSecret`)
 - `openhands/workspace/cloud/workspace.py`: `get_llm()` and `get_secrets()` return LookupSecret-backed objects
 - Tests: `tests/sdk/llm/test_llm_secret_source_api_key.py`, `tests/workspace/test_cloud_workspace_sdk_settings.py`
+
+### Personal project notes (no-code / vibe coding)
+
+If you are not writing code and want the agent to remember **your** product goals in plain language, use one Markdown file: follow `KNOWLEDGE_SETUP.md`. Copy `MY_PROJECT_KNOWLEDGE.example.md` to `MY_PROJECT_KNOWLEDGE.md` (gitignored) and edit that copy.
