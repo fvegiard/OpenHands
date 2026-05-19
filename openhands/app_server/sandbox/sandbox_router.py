@@ -60,7 +60,7 @@ async def batch_get_sandboxes(
     """Get a batch of sandboxes given their ids, returning null for any missing."""
     if len(id) > 100:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Cannot request more than 100 sandboxes at once, got {len(id)}',
         )
     sandboxes = await sandbox_service.batch_get_sandboxes(id)

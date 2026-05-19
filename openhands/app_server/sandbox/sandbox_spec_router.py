@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 from openhands.app_server.config import depends_sandbox_spec_service
 from openhands.app_server.sandbox.sandbox_spec_models import (
@@ -51,7 +51,7 @@ async def batch_get_sandbox_specs(
     """Get a batch of sandbox specs given their ids, returning null for any missing."""
     if len(id) > 100:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Cannot request more than 100 sandbox specs at once, got {len(id)}',
         )
     sandbox_specs = await sandbox_spec_service.batch_get_sandbox_specs(id)
