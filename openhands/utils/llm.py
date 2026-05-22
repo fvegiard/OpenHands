@@ -357,3 +357,56 @@ def list_foundation_models(
 
 def remove_error_modelId(model_list: list[str]) -> list[str]:
     return list(filter(lambda m: not m.startswith('bedrock'), model_list))
+
+
+class HybridRouter:
+    """
+    Hybrid LLM Router for Antigravity & OpenHands.
+    Intelligently routes requests to local Ollama instances (e.g. Qwen3.6 MoE, CodeGeeX4) 
+    or falls back to cloud APIs (Gemini 3.1 Pro / Claude 4.7) based on task complexity and 
+    local hardware availability.
+    """
+    def __init__(self, primary_local_model: str = "ollama/qwen3.6:35b-a3b-q4_K_M", fallback_cloud_model: str = "gemini-3.1-pro"):
+        self.primary_local = primary_local_model
+        self.fallback_cloud = fallback_cloud_model
+        
+    def _is_local_available(self) -> bool:
+        """Check if local Ollama daemon is responsive and has the model."""
+        try:
+            # Assuming Ollama is on localhost:11434
+            resp = httpx.get("http://127.0.0.1:11434/api/tags", timeout=2)
+            if resp.status_code == 200:
+                models = [m['name'] for m in resp.json().get('models', [])]
+                local_name = self.primary_local.replace("ollama/", "")
+                return local_name in models
+        except Exception:
+            pass
+        return False
+
+    async def completion(self, messages: list[dict], **kwargs):
+        """
+        Execute an LLM completion, trying local VRAM-optimized models first.
+        Falls back to Cloud models if local inference fails or is too complex.
+        """
+        target_model = self.primary_local if self._is_local_available() else self.fallback_cloud
+        
+        # Override target if complexity is high (e.g., architectural planning)
+        if kwargs.get("complexity", "standard") == "high":
+            logger.info("Task complexity is high. Bypassing local model for Cloud Reasoning.")
+            target_model = self.fallback_cloud
+            
+        logger.info(f"HybridRouter executing completion using: {target_model}")
+        
+        try:
+            return await litellm.acompletion(
+                model=target_model,
+                messages=messages,
+                **{k: v for k, v in kwargs.items() if k != "complexity"}
+            )
+        except Exception as e:
+            logger.warning(f"Failed with {target_model}: {e}. Falling back to cloud.")
+            return await litellm.acompletion(
+                model=self.fallback_cloud,
+                messages=messages,
+                **{k: v for k, v in kwargs.items() if k != "complexity"}
+            )

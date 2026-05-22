@@ -16,6 +16,16 @@ from pydantic import (
 from openhands.core.logger import openhands_logger as logger
 from openhands.sdk.llm import LLM
 
+# Standard Lena AI / Antigravity Hybrid Profiles
+DEFAULT_HYBRID_LOCAL_PROFILE = LLM(
+    model="ollama/qwen3.6:35b-a3b-q4_K_M",
+    base_url="http://127.0.0.1:11434"
+)
+DEFAULT_CLOUD_REASONING_PROFILE = LLM(
+    model="gemini-3.1-pro",
+    api_key="MASKED"
+)
+
 # Soft cap — keeps Settings payload bounded and blocks per-user storage
 # blow-ups. Tune if product requirements change.
 MAX_PROFILES_PER_USER: Final[int] = 10
