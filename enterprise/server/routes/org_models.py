@@ -14,8 +14,16 @@ from storage.org import Org
 from storage.org_member import OrgMember
 from storage.role import Role
 
-from openhands.sdk.settings import AgentSettings, ConversationSettings
-from openhands.utils.llm import MASKED_API_KEY, resolve_llm_base_url
+from openhands.app_server.settings.settings_models import (
+    _load_persisted_agent_settings,
+    _load_persisted_conversation_settings,
+)
+from openhands.app_server.utils.llm import MASKED_API_KEY, resolve_llm_base_url
+from openhands.sdk.settings import (
+    AgentSettingsConfig,
+    ConversationSettings,
+    OpenHandsAgentSettings,
+)
 
 
 class OrgCreationError(Exception):
@@ -58,12 +66,22 @@ class OrgAuthorizationError(OrgDeletionError):
 
 
 class OrphanedUserError(OrgDeletionError):
-    """Raised when deleting an org would leave users without any organization."""
+    """Raised when deleting an org would leave OTHER users (not the requester)
+    without any organization.
+
+    A user is "orphaned" when their only ``org_member`` row is for the org being
+    deleted. The deletion path tolerates *the requester themselves* being orphaned
+    (the personal-org self-service case — the requester is consenting to their
+    own deletion by calling ``DELETE``), but refuses to silently destroy the
+    accounts of other members. In that case it raises this error so the org
+    owner can transfer or remove those members first.
+    """
 
     def __init__(self, user_ids: list[str]):
         self.user_ids = user_ids
         super().__init__(
-            f'Cannot delete organization: {len(user_ids)} user(s) would have no remaining organization'
+            f'Cannot delete organization: {len(user_ids)} other user(s) '
+            'would have no remaining organization'
         )
 
 
@@ -155,7 +173,7 @@ class OrgResponse(BaseModel):
     sandbox_base_container_image: str | None = None
     sandbox_runtime_container_image: str | None = None
     org_version: int = 0
-    agent_settings: AgentSettings = Field(default_factory=AgentSettings)
+    agent_settings: AgentSettingsConfig = Field(default_factory=OpenHandsAgentSettings)
     conversation_settings: ConversationSettings = Field(
         default_factory=ConversationSettings
     )
@@ -174,8 +192,8 @@ class OrgResponse(BaseModel):
         return cls(
             id=str(org.id),
             name=org.name,
-            contact_name=org.contact_name,
-            contact_email=org.contact_email,
+            contact_name=org.contact_name,  # type: ignore[arg-type]
+            contact_email=org.contact_email,  # type: ignore[arg-type]
             conversation_expiration=org.conversation_expiration,
             remote_runtime_resource_factor=org.remote_runtime_resource_factor,
             billing_margin=org.billing_margin,
@@ -185,11 +203,9 @@ class OrgResponse(BaseModel):
             sandbox_base_container_image=org.sandbox_base_container_image,
             sandbox_runtime_container_image=org.sandbox_runtime_container_image,
             org_version=org.org_version if org.org_version is not None else 0,
-            agent_settings=AgentSettings.model_validate(
-                dict(org.agent_settings) if org.agent_settings else {}
-            ),
-            conversation_settings=ConversationSettings.model_validate(
-                dict(org.conversation_settings) if org.conversation_settings else {}
+            agent_settings=_load_persisted_agent_settings(org.agent_settings),
+            conversation_settings=_load_persisted_conversation_settings(
+                org.conversation_settings
             ),
             search_api_key=None,
             sandbox_api_key=None,
@@ -363,7 +379,7 @@ class OrgUpdate(BaseModel):
         member_settings = OrgMemberSettingsUpdate(
             agent_settings_diff=self.agent_settings_diff,
             conversation_settings_diff=self.conversation_settings_diff,
-            llm_api_key=self.llm_api_key or None,
+            llm_api_key=SecretStr(self.llm_api_key) if self.llm_api_key else None,
         )
         return member_settings if member_settings.has_updates() else None
 
@@ -371,7 +387,7 @@ class OrgUpdate(BaseModel):
 class OrgDefaultsSettingsResponse(BaseModel):
     """Response model for organization default settings."""
 
-    agent_settings: AgentSettings = Field(default_factory=AgentSettings)
+    agent_settings: AgentSettingsConfig = Field(default_factory=OpenHandsAgentSettings)
     conversation_settings: ConversationSettings = Field(
         default_factory=ConversationSettings
     )
@@ -402,21 +418,19 @@ class OrgDefaultsSettingsResponse(BaseModel):
         ``org_member.agent_settings_diff`` and this response always carry
         the same value.
         """
-        agent_settings = AgentSettings.model_validate(
-            dict(org.agent_settings) if org.agent_settings else {}
-        )
+        agent_settings = _load_persisted_agent_settings(org.agent_settings)
         cls._denormalize_llm_for_response(agent_settings)
         return cls(
             agent_settings=agent_settings,
-            conversation_settings=ConversationSettings.model_validate(
-                dict(org.conversation_settings) if org.conversation_settings else {}
+            conversation_settings=_load_persisted_conversation_settings(
+                org.conversation_settings
             ),
             llm_api_key_set=org.llm_api_key is not None,
             search_api_key=cls._mask_key(org.search_api_key),
         )
 
     @staticmethod
-    def _denormalize_llm_for_response(agent_settings: AgentSettings) -> None:
+    def _denormalize_llm_for_response(agent_settings: AgentSettingsConfig) -> None:
         """Rewrite ``agent_settings.llm`` in-place for UI consumption.
 
         * ``litellm_proxy/X`` → ``openhands/X`` so the basic-view provider
@@ -584,7 +598,13 @@ class OrgAppSettingsUpdate(BaseModel):
         return v
 
 
-VALID_GIT_PROVIDERS = {'github', 'gitlab', 'bitbucket'}
+VALID_GIT_PROVIDERS = {
+    'github',
+    'gitlab',
+    'bitbucket',
+    'bitbucket_data_center',
+    'azure_devops',
+}
 
 
 class GitOrgClaimRequest(BaseModel):

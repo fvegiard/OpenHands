@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 import zipfile
 from collections import defaultdict
@@ -16,10 +17,9 @@ from fastapi import Request
 from pydantic import Field, SecretStr, TypeAdapter
 
 from openhands.agent_server.models import (
-    ACPConversationInfo,
     ConversationInfo,
+    EventSortOrder,
     SendMessageRequest,
-    StartACPConversationRequest,
     StartConversationRequest,
     TextContent,
 )
@@ -85,63 +85,226 @@ from openhands.app_server.sandbox.sandbox_service import SandboxService
 from openhands.app_server.sandbox.sandbox_spec_service import SandboxSpecService
 from openhands.app_server.services.injector import InjectorState
 from openhands.app_server.services.jwt_service import JwtService
+from openhands.app_server.settings.llm_profiles import resolve_profile_llm
 from openhands.app_server.user.user_context import UserContext
 from openhands.app_server.user.user_models import UserInfo
 from openhands.app_server.utils.docker_utils import (
     replace_localhost_hostname_for_docker,
 )
+from openhands.app_server.utils.git import ensure_valid_git_branch_name
 from openhands.app_server.utils.llm_metadata import (
     get_llm_metadata,
     should_set_litellm_extra_body,
 )
 from openhands.sdk import Agent, AgentContext, LocalWorkspace
-from openhands.sdk.agent.acp_agent import ACPAgent
+from openhands.sdk.event import RESUME_CONTEXT_MARKER, render_resume_transcript
+from openhands.sdk.event.acp_tool_call import ACPToolCallEvent
 from openhands.sdk.hooks import HookConfig
 from openhands.sdk.llm import LLM
+from openhands.sdk.llm.llm_profile_store import PROFILE_NAME_REGEX
 from openhands.sdk.plugin import PluginSource
 from openhands.sdk.secret import LookupSecret, StaticSecret
+from openhands.sdk.settings import ACPAgentSettings
+from openhands.sdk.subagent import get_registered_agent_definitions
+from openhands.sdk.tool.builtins import SwitchLLMTool
 from openhands.sdk.utils.paging import page_iterator
+from openhands.sdk.utils.redact import (
+    redact_api_key_literals,
+    redact_text_secrets,
+    sanitize_config,
+)
 from openhands.sdk.workspace.remote.async_remote_workspace import AsyncRemoteWorkspace
-from openhands.server.types import AppMode
 from openhands.tools.preset.default import (
     get_default_tools,
+    register_builtins_agents,
 )
 from openhands.tools.preset.planning import (
     format_plan_structure,
     get_planning_tools,
 )
-from openhands.utils._redact_compat import sanitize_config
-from openhands.utils.git import ensure_valid_git_branch_name
-from openhands.utils.sdk_settings_compat import ACPAgentSettings
 
 _conversation_info_type_adapter = TypeAdapter(list[ConversationInfo | None])
-_acp_conversation_info_type_adapter = TypeAdapter(list[ACPConversationInfo | None])
 _logger = logging.getLogger(__name__)
 
+# Limits for bootstrap-prompt resume (Solution A of issue #14260).
+# Generic rendering is handled by openhands.sdk.event.render_resume_transcript.
+# The fetch/pagination wrapper, double-resume guard, and provider-specific
+# scrubbing (_sanitize_paths, _strip_terminal_boilerplate, _extract_output_text,
+# _format_raw_input, _RAW_INPUT_NOISE_KEYS) stay here — they encode sandbox-
+# lifecycle and Codex-shape concerns the SDK layer deliberately doesn't know about.
+_ACP_RESUME_MAX_EVENTS = 200  # hard event-count cap (prevents O(N) fetches)
+_ACP_RESUME_CONTEXT_MAX_CHARS = 60_000  # total resume block
+_ACP_RESUME_MESSAGE_MAX_CHARS = 8_000  # per message turn
+_ACP_RESUME_TOOL_MAX_CHARS = 2_000  # per tool event
 
-def _agent_kind_to_router_path(agent_kind: str) -> str:
-    """Map agent_kind discriminator to the agent-server router path prefix."""
-    if agent_kind == 'acp':
-        return 'acp/conversations'
-    return 'conversations'
+
+def _truncate_keep_head(text: str, max_chars: int) -> str:
+    """Truncate to at most max_chars, keeping the start."""
+    if max_chars <= 0:
+        return ''
+    if len(text) <= max_chars:
+        return text
+    if max_chars < 4:
+        return text[:max_chars]
+    return text[: max_chars - 3] + '...'
 
 
-def _split_ids_by_kind(
-    conversation_ids: list[str],
-    conversation_kind_by_id: dict[str, str],
-) -> tuple[list[str], list[str]]:
-    """Split conversation IDs into (llm_ids, acp_ids) based on their agent_kind."""
-    llm_ids = [
-        cid
-        for cid in conversation_ids
-        if conversation_kind_by_id.get(cid, 'llm') != 'acp'
-    ]
-    acp_ids = [
-        cid
-        for cid in conversation_ids
-        if conversation_kind_by_id.get(cid, 'llm') == 'acp'
-    ]
-    return llm_ids, acp_ids
+_ABS_PATH_RE = re.compile(r'/[^\s\'",:}\]]{10,}')
+
+
+# Pytest/terminal boilerplate lines to strip from command output.
+_TERMINAL_BOILERPLATE_RE = re.compile(
+    r'^(?:'
+    r'={10,}.*test session starts.*={10,}'
+    r'|platform \w+'
+    r'|cachedir:'
+    r'|rootdir:'
+    r'|plugins:'
+    r'|asyncio:'
+    r'|collecting \.\.\.'
+    r')',
+    re.MULTILINE,
+)
+
+
+def _strip_terminal_boilerplate(text: str) -> str:
+    """Remove pytest/shell boilerplate header lines from command output.
+
+    Strips ``platform``, ``cachedir``, ``rootdir``, ``plugins``, ``asyncio``,
+    and ``collecting ...`` lines that carry no useful information for a resumed
+    agent.  The test result lines (PASSED/FAILED/ERROR) and summary are kept.
+    """
+    lines = [ln for ln in text.splitlines() if not _TERMINAL_BOILERPLATE_RE.match(ln)]
+    # Collapse runs of blank lines left behind after stripping.
+    out: list[str] = []
+    prev_blank = False
+    for ln in lines:
+        blank = not ln.strip()
+        if blank and prev_blank:
+            continue
+        out.append(ln)
+        prev_blank = blank
+    return '\n'.join(out).strip()
+
+
+# Provider-internal metadata keys that add no value to a resume message.
+# Codex execute tools include call_id, process_id, turn_id, timestamps, etc.
+# 'cwd' is always the sandbox working directory — after path sanitization it
+# shows as the sandbox ID, which is meaningless; drop it too.
+_RAW_INPUT_NOISE_KEYS = frozenset(
+    {
+        'call_id',
+        'process_id',
+        'turn_id',
+        'started_at_ms',
+        'completed_at_ms',
+        'parsed_cmd',
+        'source',
+        'auto_approved',
+        'cwd',
+    }
+)
+
+
+def _extract_output_text(raw_output: object) -> str:
+    """Extract the human-readable text from a tool's raw_output.
+
+    Some ACP providers (e.g. Codex) wrap stdout/stderr in a dict alongside
+    metadata.  We pull out just the meaningful content so the agent sees the
+    actual command output rather than a Python dict repr.
+    """
+    if isinstance(raw_output, dict):
+        stdout = str(raw_output.get('stdout', '') or '').strip()
+        stderr = str(raw_output.get('stderr', '') or '').strip()
+        parts = []
+        if stdout:
+            parts.append(stdout)
+        if stderr:
+            parts.append(f'[stderr]: {stderr}')
+        if parts:
+            return '\n'.join(parts)
+        # dict but no stdout/stderr keys — fall through to repr
+    return str(raw_output)
+
+
+def _format_raw_input(raw: dict, max_chars: int, is_edit_diff: bool = False) -> str:
+    """Render a tool's raw_input dict in a readable form.
+
+    For edit-diff tools only the filename is shown — the file on the
+    persistent /workspace PVC is the source of truth.
+
+    For Codex-style changes dicts (``{path: {type, content}}``) the file
+    contents are rendered under their sanitized basenames.
+
+    For execute tools internal metadata keys (call_id, process_id, …) are
+    stripped; a list-valued ``command`` field is unwrapped to its last element.
+
+    For all other tools, multiline string values are rendered with real
+    newlines; single-line values as ``key=value``.
+    """
+    if is_edit_diff:
+        # Patch/diff: file is on /workspace — just show the filename.
+        fp = _sanitize_paths(str(raw.get('file_path', '')))
+        return f'file={fp}'
+
+    # Codex-style bulk changes: {abs_path: {type, content}, …}
+    if 'changes' in raw and isinstance(raw.get('changes'), dict):
+        changes = raw['changes']
+        parts: list[str] = []
+        for path, change in changes.items():
+            basename = os.path.basename(str(path)) if path else 'file'
+            content = str(change.get('content', '') or '')
+            change_type = change.get('type', 'edit')
+            if content:
+                parts.append(
+                    f'{change_type} {basename}:\n{_truncate_keep_head(content, 400)}'
+                )
+            else:
+                parts.append(f'{change_type} {basename}')
+        return _truncate_keep_head('\n'.join(parts), max_chars)
+
+    # General case: filter noise keys, extract command list, sanitize values.
+    cleaned: dict[str, object] = {}
+    for k, v in raw.items():
+        if k in _RAW_INPUT_NOISE_KEYS:
+            continue
+        # Unwrap list-valued command: ['/bin/zsh', '-lc', 'actual cmd'] → 'actual cmd'
+        if k == 'command' and isinstance(v, list) and v:
+            cleaned[k] = v[-1]
+        else:
+            cleaned[k] = v
+
+    out_parts: list[str] = []
+    for k, v in cleaned.items():
+        if isinstance(v, str):
+            v_san = _sanitize_paths(v)
+            if '\n' in v_san:
+                out_parts.append(f'{k}:\n{v_san}')
+            else:
+                out_parts.append(f'{k}={v_san}')
+        else:
+            out_parts.append(f'{k}={_sanitize_paths(str(v))}')
+    return _truncate_keep_head('\n'.join(out_parts), max_chars)
+
+
+def _sanitize_paths(text: str) -> str:
+    """Replace absolute filesystem paths with their basename.
+
+    ACP tool raw_input/raw_output often contains the full ephemeral sandbox
+    path (e.g. /private/var/folders/.../hello.py).  That path is meaningless
+    in a resumed session and could confuse the agent about file locations.
+    We keep only the basename so the agent retains the filename intent.
+    """
+
+    def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
+        path = m.group(0)
+        # Only shorten paths that look like absolute filesystem paths, not URLs.
+        if path.startswith('//') or '://' in path:
+            return path
+        base = os.path.basename(path.rstrip('/'))
+        return base if base else path
+
+    return _ABS_PATH_RE.sub(_replace, text)
 
 
 # Planning agent instruction to prevent "Ready to proceed?" behavior
@@ -180,7 +343,6 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
     openhands_provider_base_url: str | None
     access_token_hard_timeout: timedelta | None
     app_mode: str | None = None
-    tavily_api_key: str | None = None
 
     async def _get_sandbox_grouping_strategy(self) -> SandboxGroupingStrategy:
         """Get the sandbox grouping strategy from user settings."""
@@ -268,6 +430,11 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
     ) -> AsyncGenerator[AppConversationStartTask, None]:
         # Create and yield the start task
         user_id = await self.user_context.get_user_id()
+        # Prefer the user's email as the Laminar trace user id so traces are
+        # immediately attributable in the Laminar UI instead of showing only
+        # a pseudo-anonymous internal id. Falls back to ``user_id`` when no
+        # email is available (e.g. OSS mode).
+        laminar_user_id = await self.user_context.get_user_email() or user_id
 
         # Validate and inherit from parent conversation if provided
         if request.parent_conversation_id:
@@ -300,6 +467,12 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             sandbox = await self.sandbox_service.get_sandbox(sandbox_id)
             assert sandbox is not None
             agent_server_url = self._get_agent_server_url(sandbox)
+
+            # Mirror the user's LLM profiles into the sandbox so the agent's
+            # built-in switch_llm tool can resolve them (in SaaS profiles live
+            # on the app-server, not the sandbox filesystem). Before conversation
+            # creation, so the tool is enabled; re-runs on every start/resume.
+            await self._seed_sandbox_profiles(agent_server_url, sandbox.session_api_key)
 
             # Get the working dir
             sandbox_spec = await self.sandbox_spec_service.get_sandbox_spec(
@@ -354,45 +527,59 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             body_json = start_conversation_request.model_dump(
                 mode='json', context={'expose_secrets': True}
             )
-            # Log hook_config to verify it's being passed
-            hook_config_in_request = body_json.get('hook_config')
-            _logger.debug(
-                f'Sending StartConversationRequest with hook_config: '
-                f'{hook_config_in_request}'
-            )
+            # Inject ``user_id`` into the start-conversation body so the
+            # agent-server can call ``Laminar.set_trace_user_id()`` and tag
+            # traces with the authenticated user. The currently pinned
+            # ``openhands-sdk`` release does not yet expose ``user_id`` on
+            # ``StartConversationRequest`` (added in software-agent-sdk#3242),
+            # so passing it to ``create_request(...)`` is silently dropped by
+            # pydantic. The agent-server reads the field directly from the
+            # request body, so injecting it here works regardless of whether
+            # the local SDK model knows about it. Remove this once OpenHands
+            # pins to an SDK release that exposes ``user_id`` on
+            # ``StartConversationRequest``.
+            if laminar_user_id:
+                body_json['user_id'] = laminar_user_id
             headers = (
                 {'X-Session-API-Key': sandbox.session_api_key}
                 if sandbox.session_api_key
                 else {}
             )
-            is_acp = isinstance(start_conversation_request, StartACPConversationRequest)
-            router_path = 'acp/conversations' if is_acp else 'conversations'
             response = await self.httpx_client.post(
-                f'{agent_server_url}/api/{router_path}',
+                f'{agent_server_url}/api/conversations',
                 json=body_json,
                 headers=headers,
                 timeout=self.sandbox_startup_timeout,
             )
 
             response.raise_for_status()
-            if is_acp:
-                info = ACPConversationInfo.model_validate(response.json())
+            info = ConversationInfo.model_validate(response.json())
+            # Determine kind / llm_model from the request we built (its
+            # ``agent`` is the source of truth here): the response echoes
+            # the same agent back through the AgentBase discriminator.
+            request_agent = start_conversation_request.agent
+            tags: dict[str, str] = {}
+            if request_agent.agent_kind == 'acp':
+                llm_model = None
                 agent_kind = 'acp'
-                display_model = start_conversation_request.agent.acp_model
+                # Persist the active ACP provider key so the conversation UI
+                # can resolve a brand label ("Claude Code", "Codex", …) via
+                # the SDK registry without keeping a per-conversation column.
+                acp_user = await self.user_context.get_user_info()
+                if isinstance(acp_user.agent_settings, ACPAgentSettings):
+                    tags['acp_server'] = acp_user.agent_settings.acp_server
             else:
-                info = ConversationInfo.model_validate(response.json())
-                agent_kind = 'llm'
-                display_model = start_conversation_request.agent.llm.model
+                llm_model = request_agent.llm.model
+                agent_kind = 'openhands'
 
-            # Store info...
-            user_id = await self.user_context.get_user_id()
             app_conversation_info = AppConversationInfo(
                 id=info.id,
                 title=f'Conversation {info.id.hex[:5]}',
                 sandbox_id=sandbox.id,
                 created_by_user_id=user_id,
-                llm_model=display_model,
+                llm_model=llm_model,
                 agent_kind=agent_kind,
+                tags=tags,
                 # Git parameters
                 selected_repository=request.selected_repository,
                 selected_branch=request.selected_branch,
@@ -421,6 +608,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 await self.event_callback_service.save_event_callback(
                     EventCallback(
                         conversation_id=info.id,
+                        event_kind=processor.get_event_kind(),
                         processor=processor,
                     )
                 )
@@ -442,7 +630,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         except Exception as exc:
             _logger.exception('Error starting conversation', stack_info=True)
             task.status = AppConversationStartTaskStatus.ERROR
-            task.detail = str(exc)
+            task.detail = redact_text_secrets(redact_api_key_literals(str(exc)))
             yield task
 
     async def _build_app_conversations(
@@ -451,13 +639,6 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         sandbox_id_to_conversation_ids = self._get_sandbox_id_to_conversation_ids(
             app_conversation_infos
         )
-
-        # Build a mapping from conversation id -> agent_kind for routing
-        conversation_kind_by_id: dict[str, str] = {
-            str(info.id): info.agent_kind
-            for info in app_conversation_infos
-            if info is not None
-        }
 
         # Get referenced sandboxes in a single batch operation...
         sandboxes = await self.sandbox_service.batch_get_sandboxes(
@@ -470,7 +651,6 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             self._get_live_conversation_info(
                 sandbox,
                 sandbox_id_to_conversation_ids.get(sandbox.id),
-                conversation_kind_by_id,
             )
             for sandbox in sandboxes
             if sandbox and sandbox.status == SandboxStatus.RUNNING
@@ -505,73 +685,43 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
     async def _get_live_conversation_info(
         self,
         sandbox: SandboxInfo,
-        conversation_ids: list[str],
-        conversation_kind_by_id: dict[str, str] | None = None,
-    ) -> list[ConversationInfo | ACPConversationInfo]:
+        conversation_ids: list[UUID],
+    ) -> list[ConversationInfo]:
         """Get agent status for multiple conversations from the Agent Server.
 
-        Splits conversation_ids by agent_kind and fetches from the appropriate
-        endpoint (/api/conversations for LLM, /api/acp/conversations for ACP).
+        Uses the unified ``/api/conversations`` endpoint, which accepts both
+        regular and ACP agents through the ``AgentBase`` discriminated union.
         """
         if not conversation_ids:
             return []
-
-        conversation_kind_by_id = conversation_kind_by_id or {}
-
-        llm_ids, acp_ids = _split_ids_by_kind(conversation_ids, conversation_kind_by_id)
 
         agent_server_url = self._get_agent_server_url(sandbox)
         headers: dict[str, str] = {}
         if sandbox.session_api_key:
             headers['X-Session-API-Key'] = sandbox.session_api_key
 
-        results: list[ConversationInfo | ACPConversationInfo] = []
-
-        # Fetch LLM conversations
-        if llm_ids:
-            try:
-                url = f'{agent_server_url.rstrip("/")}/api/conversations'
-                response = await self.httpx_client.get(
-                    url, params={'ids': llm_ids}, headers=headers
-                )
-                response.raise_for_status()
-                data = response.json()
-                infos = _conversation_info_type_adapter.validate_python(data)
-                results.extend(c for c in infos if c)
-            except httpx.HTTPStatusError:
-                _logger.warning(
-                    f'Error getting LLM conversation status from sandbox {sandbox.id}',
-                    exc_info=True,
-                )
-            except Exception:
-                _logger.exception(
-                    f'Error getting LLM conversation status from sandbox {sandbox.id}',
-                    stack_info=True,
-                )
-
-        # Fetch ACP conversations
-        if acp_ids:
-            try:
-                url = f'{agent_server_url.rstrip("/")}/api/acp/conversations'
-                response = await self.httpx_client.get(
-                    url, params={'ids': acp_ids}, headers=headers
-                )
-                response.raise_for_status()
-                data = response.json()
-                infos = _acp_conversation_info_type_adapter.validate_python(data)
-                results.extend(c for c in infos if c)
-            except httpx.HTTPStatusError:
-                _logger.warning(
-                    f'Error getting ACP conversation status from sandbox {sandbox.id}',
-                    exc_info=True,
-                )
-            except Exception:
-                _logger.exception(
-                    f'Error getting ACP conversation status from sandbox {sandbox.id}',
-                    stack_info=True,
-                )
-
-        return results
+        try:
+            url = f'{agent_server_url.rstrip("/")}/api/conversations'
+            response = await self.httpx_client.get(
+                url,
+                params={'ids': [str(c) for c in conversation_ids]},
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+            infos = _conversation_info_type_adapter.validate_python(data)
+            return [c for c in infos if c]
+        except httpx.HTTPStatusError:
+            _logger.warning(
+                f'Error getting conversation status from sandbox {sandbox.id}',
+                exc_info=True,
+            )
+        except Exception:
+            _logger.exception(
+                f'Error getting conversation status from sandbox {sandbox.id}',
+                stack_info=True,
+            )
+        return []
 
     def _build_conversation(
         self,
@@ -597,10 +747,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 None,
             )
             if conversation_url:
-                router_path = _agent_kind_to_router_path(
-                    app_conversation_info.agent_kind
-                )
-                conversation_url += f'/api/{router_path}/{app_conversation_info.id.hex}'
+                conversation_url += f'/api/conversations/{app_conversation_info.id.hex}'
             session_api_key = sandbox.session_api_key
 
         return AppConversation(
@@ -820,6 +967,83 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             httpx_client=self.httpx_client,
         )
 
+    async def _seed_sandbox_profiles(
+        self, agent_server_url: str, session_api_key: str | None
+    ) -> None:
+        """Mirror the user's saved LLM profiles into the sandbox profile store.
+
+        The agent's built-in ``switch_llm`` tool resolves profiles from the
+        sandbox filesystem; in SaaS they live on the app-server, so without this
+        the tool sees none. Upserts the current profiles (so adds/edits/renames
+        land) and prunes ones deleted on the app-server, keeping the sandbox in
+        sync. Best-effort: failures are logged, never raised, so they can't block
+        the conversation.
+        """
+        # Imported lazily: settings_router transitively imports this service, so
+        # a module-level import would be circular.
+        from openhands.app_server.settings.settings_router import LITE_LLM_API_URL
+
+        headers = {'X-Session-API-Key': session_api_key} if session_api_key else {}
+        base_url = f'{agent_server_url}/api/profiles'
+        try:
+            user = await self.user_context.get_user_info()
+            profiles = user.llm_profiles.profiles
+            settings_llm = getattr(user.agent_settings, 'llm', None)
+            fallback_api_key = getattr(settings_llm, 'api_key', None)
+        except Exception:
+            _logger.exception(
+                'Failed to load profiles for sandbox %s', agent_server_url
+            )
+            return
+
+        # Upsert each profile independently so one failure can't dark the rest.
+        for name, profile_llm in profiles.items():
+            # Org profile names aren't character-restricted, so skip any the
+            # agent-server's store would reject — both to avoid a futile call and
+            # to keep an exotic name (e.g. ``..``) from path-injecting the api-key
+            # payload into a different request URL.
+            if not PROFILE_NAME_REGEX.match(name):
+                continue
+            try:
+                resolved = resolve_profile_llm(
+                    profile_llm,
+                    managed_proxy_url=LITE_LLM_API_URL,
+                    fallback_api_key=fallback_api_key,
+                )
+                response = await self.httpx_client.post(
+                    f'{base_url}/{name}',
+                    json={
+                        'include_secrets': True,
+                        'llm': resolved.model_dump(
+                            mode='json',
+                            exclude_none=True,
+                            context={'expose_secrets': True},
+                        ),
+                    },
+                    headers=headers,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+            except Exception:
+                _logger.warning(
+                    'Failed to seed LLM profile %r into sandbox', name, exc_info=True
+                )
+
+        # Prune profiles deleted/renamed on the app-server so the agent can't
+        # switch to a stale one. Independent best-effort.
+        try:
+            listed = await self.httpx_client.get(
+                base_url, headers=headers, timeout=30.0
+            )
+            listed.raise_for_status()
+            stored = {p['name'] for p in listed.json().get('profiles', [])}
+            for stale_name in stored - set(profiles):
+                await self.httpx_client.delete(
+                    f'{base_url}/{stale_name}', headers=headers, timeout=30.0
+                )
+        except Exception:
+            _logger.warning('Failed to prune sandbox profiles', exc_info=True)
+
     def _get_agent_server_url(self, sandbox: SandboxInfo) -> str:
         """Get agent server url for running sandbox."""
         exposed_urls = sandbox.exposed_urls
@@ -993,44 +1217,23 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             usage_id='agent',
         )
 
-    async def _get_tavily_api_key(self, user: UserInfo) -> str | None:
-        """Get Tavily search API key, prioritizing user's key over service key.
-
-        Args:
-            user: User information
-
-        Returns:
-            Tavily API key if available, None otherwise
-        """
-        # Get the actual API key values, prioritizing user's key over service key
-        user_search_key = None
-        if user.search_api_key:
-            key_value = user.search_api_key.get_secret_value()
-            if key_value and key_value.strip():
-                user_search_key = key_value
-
-        service_tavily_key = None
-        if self.tavily_api_key:
-            # tavily_api_key is already a string (extracted in the factory method)
-            if self.tavily_api_key.strip():
-                service_tavily_key = self.tavily_api_key
-
-        return user_search_key or service_tavily_key
-
     async def _add_system_mcp_servers(
-        self, mcp_servers: dict[str, Any], user: UserInfo, conversation_id: UUID
+        self, mcp_servers: dict[str, Any], conversation_id: UUID
     ) -> None:
-        """Add system-generated MCP servers (default OpenHands server and Tavily).
+        """Add system-generated MCP servers (default OpenHands server).
+
+        The default server includes the Tavily search proxy if configured.
+        Tavily search is proxied through the app server to avoid exposing
+        the API key to sandboxes.
 
         Args:
             mcp_servers: Dictionary to add servers to
-            user: User information for API keys
             conversation_id: Conversation ID forwarded to the OpenHands MCP server
         """
         if not self.web_url:
             return
 
-        # Add default OpenHands MCP server
+        # Add default OpenHands MCP server (includes Tavily proxy if configured)
         mcp_url = f'{self.web_url}/mcp/mcp'
         mcp_servers['default'] = {
             'url': mcp_url,
@@ -1042,16 +1245,6 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         if mcp_api_key:
             mcp_servers['default']['headers']['X-Session-API-Key'] = mcp_api_key
 
-        # Add Tavily search if API key is available
-        tavily_api_key = await self._get_tavily_api_key(user)
-        if tavily_api_key:
-            _logger.info('Adding search engine to MCP config')
-            mcp_servers['tavily'] = {
-                'url': f'https://mcp.tavily.com/mcp/?tavilyApiKey={tavily_api_key}'
-            }
-        else:
-            _logger.info('No search engine API key found, skipping search engine')
-
     def _merge_custom_mcp_config(
         self, mcp_servers: dict[str, Any], user: UserInfo
     ) -> None:
@@ -1061,6 +1254,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             mcp_servers: Dictionary to add servers to
             user: User information containing custom MCP config
         """
+        if isinstance(user.agent_settings, ACPAgentSettings):
+            return
+
         sdk_mcp = user.agent_settings.mcp_config
         if not sdk_mcp or not sdk_mcp.mcpServers:
             return
@@ -1107,8 +1303,8 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         # Configure MCP - SDK expects format: {'mcpServers': {'server_name': {...}}}
         mcp_servers: dict[str, Any] = {}
 
-        # Add system-generated servers (default + tavily)
-        await self._add_system_mcp_servers(mcp_servers, user, conversation_id)
+        # Add system-generated servers (default MCP server with Tavily proxy)
+        await self._add_system_mcp_servers(mcp_servers, conversation_id)
 
         # Merge custom servers from user settings
         self._merge_custom_mcp_config(mcp_servers, user)
@@ -1303,7 +1499,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         selected_repository: str | None = None,
         plugins: list[PluginSpec] | None = None,
         api_secrets: dict[str, SecretStr] | None = None,
-    ) -> StartConversationRequest | StartACPConversationRequest:
+    ) -> StartConversationRequest:
         """Build a complete StartConversationRequest for a user.
 
         Resolves LLM, MCP, tools, secrets and agent context, then
@@ -1335,7 +1531,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
 
         # Route ACP agent settings to the ACP-specific builder
         if isinstance(user.agent_settings, ACPAgentSettings):
-            return await self._build_acp_start_conversation_request(
+            acp_request = await self._build_acp_start_conversation_request(
                 sandbox=sandbox,
                 conversation_id=conversation_id,
                 initial_message=initial_message,
@@ -1344,6 +1540,16 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 plugins=plugins,
                 api_secrets=api_secrets,
             )
+            if remote_workspace:
+                acp_request = await self._load_skills_onto_request(
+                    acp_request,
+                    sandbox,
+                    remote_workspace,
+                    selected_repository,
+                    get_project_dir(working_dir, selected_repository),
+                    user.disabled_skills,
+                )
+            return acp_request
 
         project_dir = get_project_dir(working_dir, selected_repository)
         workspace = LocalWorkspace(working_dir=project_dir)
@@ -1396,13 +1602,20 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 effective_suffix = web_host_context
 
         # --- tools ----------------------------------------------------------
+        agent_definitions: list[Any] = []
         if agent_type == AgentType.PLAN:
             plan_path = None
             if project_dir:
                 plan_path = self._compute_plan_path(project_dir, git_provider)
             tools = get_planning_tools(plan_path=plan_path)
         else:
-            tools = get_default_tools(enable_browser=True)
+            register_builtins_agents(enable_browser=True)
+            tools = get_default_tools(
+                enable_browser=True,
+                enable_sub_agents=user.agent_settings.enable_sub_agents,
+            )
+            if user.agent_settings.enable_sub_agents:
+                agent_definitions = list(get_registered_agent_definitions())
 
         # --- build AgentSettings and create agent ---------------------------
         from fastmcp.mcp_config import MCPConfig
@@ -1419,25 +1632,37 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             }
         )
         agent = configured_agent_settings.create_agent()
+
+        # SaaS profiles live on the user/org record, not the sandbox
+        # filesystem, so we attach the agent's built-in switch_llm tool
+        # ourselves rather than relying on create_agent()'s gating. Enabled
+        # whenever there are at least two valid saved profiles (a switch needs
+        # a target).
+        valid_profile_names = [
+            name
+            for name in user.llm_profiles.profiles
+            if PROFILE_NAME_REGEX.match(name)
+        ]
+        if (
+            len(valid_profile_names) >= 2
+            and SwitchLLMTool.__name__ not in agent.include_default_tools
+        ):
+            agent = agent.model_copy(
+                update={
+                    'include_default_tools': [
+                        *agent.include_default_tools,
+                        SwitchLLMTool.__name__,
+                    ]
+                }
+            )
+
         agent = self._apply_server_agent_overrides(
             agent, agent_type, mcp_config, conversation_id, user.id
         )
 
-        # --- skills + hooks (require remote workspace) ----------------------
+        # --- hooks (require remote workspace; must precede request build) -----
         hook_config: HookConfig | None = None
         if remote_workspace:
-            try:
-                agent = await self._load_skills_and_update_agent(
-                    sandbox,
-                    agent,
-                    remote_workspace,
-                    selected_repository,
-                    project_dir,
-                    disabled_skills=user.disabled_skills,
-                )
-            except Exception as e:
-                _logger.warning(f'Failed to load skills: {e}', exc_info=True)
-
             try:
                 _logger.debug(
                     f'Attempting to load hooks from workspace: '
@@ -1448,7 +1673,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 )
                 if hook_config:
                     _logger.debug(
-                        f'Successfully loaded hooks: {hook_config.model_dump()}'
+                        f'Successfully loaded hooks: {sanitize_config(hook_config.model_dump())}'
                     )
                 else:
                     _logger.debug('No hooks found in workspace')
@@ -1477,6 +1702,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 'workspace': workspace,
                 'conversation_id': conversation_id,
                 'initial_message': final_initial_message,
+                'agent_definitions': agent_definitions,
                 'plugins': sdk_plugins,
                 'hook_config': hook_config,
             }
@@ -1484,57 +1710,190 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
 
         # Pass agent explicitly — it has server-only overrides (system
         # prompts, LLM metadata, skills) applied after create_agent().
-        return conv_settings.create_request(StartConversationRequest, agent=agent)
-
-    @staticmethod
-    def _acp_provider_env(user: UserInfo) -> dict[str, str]:
-        """Translate UI-saved LLM credentials into provider-native env vars.
-
-        The ACP subprocess reads provider credentials from environment variables.
-        Maps the user's LLM API key to the env var expected by the active ACP
-        server via ``ACPAgentSettings.api_key_env_var``. Custom servers return
-        ``None`` — users manage credentials entirely via ``acp_env``.
-
-        Args:
-            user: User information containing ACP agent settings.
-
-        Returns:
-            Dict of env var name → value to inject into the ACP subprocess.
-        """
-        if not isinstance(user.agent_settings, ACPAgentSettings):
-            return {}
-
-        acp_settings = user.agent_settings
-        env: dict[str, str] = {}
-
-        llm_api_key = acp_settings.llm.api_key
-        if not llm_api_key:
-            return env
-
-        key_value = (
-            llm_api_key.get_secret_value()
-            if isinstance(llm_api_key, SecretStr)
-            else str(llm_api_key)
+        # ``user_id`` is forwarded so the agent-server can attach it to
+        # observability spans (see software-agent-sdk#3242). We prefer the
+        # user's email so Laminar traces are immediately attributable, and
+        # fall back to the internal user id when no email is available.
+        # The kwarg is dropped silently by pydantic on SDK versions that
+        # don't yet expose the field; the start-conversation POST also
+        # injects it directly into the JSON body as a forward-compatible
+        # fallback.
+        laminar_user_id = await self.user_context.get_user_email() or user.id
+        request = conv_settings.create_request(
+            StartConversationRequest, agent=agent, user_id=laminar_user_id
         )
-        if not key_value or not key_value.strip():
-            return env
 
-        # TODO: simplify to `acp_settings.api_key_env_var` once OpenHands is
-        # pinned to an SDK version that includes software-agent-sdk PR #2984.
-        # The fallback per-server mapping below duplicates that SDK property.
-        api_key_env: str | None = getattr(acp_settings, 'api_key_env_var', None)
-        if api_key_env is None:
-            _SERVER_KEY_MAP = {
-                'claude-code': 'ANTHROPIC_API_KEY',
-                'codex': 'OPENAI_API_KEY',
-                'gemini-cli': 'GEMINI_API_KEY',
-            }
-            api_key_env = _SERVER_KEY_MAP.get(acp_settings.acp_server)
+        # --- skills (require remote workspace) ------------------------------
+        if remote_workspace:
+            request = await self._load_skills_onto_request(
+                request,
+                sandbox,
+                remote_workspace,
+                selected_repository,
+                project_dir,
+                user.disabled_skills,
+            )
 
-        if api_key_env:
-            env[api_key_env] = key_value
+        return request
 
-        return env
+    async def _load_skills_onto_request(
+        self,
+        request: StartConversationRequest,
+        sandbox: SandboxInfo,
+        remote_workspace: AsyncRemoteWorkspace,
+        selected_repository: str | None,
+        project_dir: str,
+        disabled_skills: list[str] | None,
+    ) -> StartConversationRequest:
+        """Load workspace skills onto a conversation request's agent.
+
+        Used by both the LLM and ACP arms of
+        ``_build_start_conversation_request_for_user`` so that skill-loading
+        semantics only need to change in one place.
+        """
+        try:
+            updated_agent = await self._load_skills_and_update_agent(
+                sandbox,
+                request.agent,
+                remote_workspace,
+                selected_repository,
+                project_dir,
+                disabled_skills=disabled_skills,
+            )
+            return request.model_copy(update={'agent': updated_agent})
+        except Exception as e:
+            _logger.warning(f'Failed to load skills: {e}', exc_info=True)
+            return request
+
+    async def _synthesize_acp_resume_initial_message(
+        self,
+        conversation_id: UUID,
+        initial_message: SendMessageRequest | None = None,
+    ) -> SendMessageRequest | None:
+        """Build a bootstrap-prompt resume message from the durable event store.
+
+        When a sandbox is recycled the ACP server's own session storage is gone,
+        so ``session/load`` cannot be used.  Instead we start a fresh
+        ``new_session`` and inject the prior event history as the first user
+        message (Solution A of issue #14260).
+
+        Returns ``None`` when there are no prior events (fresh conversation).
+        If ``initial_message`` is provided it is appended after the history block
+        so the agent receives both context and the new user turn.
+        """
+        # Guard: don't double-wrap an already-synthesized resume message.
+        if initial_message and initial_message.content:
+            first_text = getattr(initial_message.content[0], 'text', None)
+            if isinstance(first_text, str) and first_text.startswith(
+                RESUME_CONTEXT_MARKER
+            ):
+                return initial_message
+
+        # Fetch newest-first so that when the conversation exceeds
+        # _ACP_RESUME_MAX_EVENTS we keep the most recent context, not the oldest.
+        # The count cap avoids O(N) fetches for very long conversations; the
+        # character cap (_ACP_RESUME_CONTEXT_MAX_CHARS) is applied at render time.
+        all_events: list = []
+        try:
+            page_id: str | None = None
+            while len(all_events) < _ACP_RESUME_MAX_EVENTS:
+                page = await self.event_service.search_events(
+                    conversation_id,
+                    sort_order=EventSortOrder.TIMESTAMP_DESC,
+                    page_id=page_id,
+                    limit=100,
+                )
+                all_events.extend(page.items)
+                if len(all_events) >= _ACP_RESUME_MAX_EVENTS:
+                    all_events = all_events[:_ACP_RESUME_MAX_EVENTS]
+                    break
+                if page.next_page_id is None:
+                    break
+                page_id = page.next_page_id
+        except Exception:
+            _logger.warning(
+                'Failed to fetch events for ACP resume of conversation %s',
+                conversation_id,
+                exc_info=True,
+            )
+            return initial_message
+        all_events.reverse()
+
+        # Pre-process ACPToolCallEvents with OpenHands-specific scrubbing before
+        # handing to the SDK renderer:
+        #   - _format_raw_input: filters Codex noise keys, handles Codex bulk-changes
+        #     shape, strips diff content (file is durable on /workspace).
+        #   - _extract_output_text: unwraps Codex {stdout, stderr} output dicts.
+        #   - _strip_terminal_boilerplate: removes pytest/shell header lines.
+        # _sanitize_paths is applied post-render so it also catches tool titles
+        # and message text that the SDK renders without knowing about sandbox paths.
+        # Placeholder events (ACP streams before params arrive) are dropped here.
+        scrubbed: list = []
+        for event in all_events:
+            if not isinstance(event, ACPToolCallEvent):
+                scrubbed.append(event)
+                continue
+            if (
+                not event.raw_input
+                and event.raw_output is None
+                and not event.is_error
+                and not event.content
+            ):
+                continue
+            raw_in = dict(event.raw_input) if isinstance(event.raw_input, dict) else {}
+            scrubbed_input: object = (
+                _format_raw_input(raw_in, 800, is_edit_diff=event.is_patch_edit)
+                if raw_in
+                else None
+            )
+            scrubbed_output: object = event.raw_output
+            if event.raw_output is not None:
+                raw_out = _strip_terminal_boilerplate(
+                    _sanitize_paths(_extract_output_text(event.raw_output))
+                )
+                if event.is_error and len(raw_out) > 800:
+                    raw_out = '...\n' + raw_out[-800:]
+                else:
+                    raw_out = _truncate_keep_head(raw_out, 800)
+                scrubbed_output = raw_out
+            scrubbed.append(
+                event.model_copy(
+                    update={'raw_input': scrubbed_input, 'raw_output': scrubbed_output}
+                )
+            )
+
+        resume_text = render_resume_transcript(
+            scrubbed,
+            header_body=(
+                'The sandbox was recycled and the ACP agent session storage was lost. '
+                'The following is the conversation history from the previous session. '
+                'Please treat this as context and continue from where we left off.'
+            ),
+            max_chars=_ACP_RESUME_CONTEXT_MAX_CHARS,
+            max_message_chars=_ACP_RESUME_MESSAGE_MAX_CHARS,
+            max_tool_chars=_ACP_RESUME_TOOL_MAX_CHARS,
+        )
+        if resume_text is None:
+            return initial_message
+
+        # Sanitize paths in the rendered text (tool titles, message bodies, etc.)
+        resume_text = _sanitize_paths(resume_text)
+
+        if initial_message is None:
+            return SendMessageRequest(
+                role='user',
+                content=[TextContent(type='text', text=resume_text)],
+            )
+
+        # Preserve the new user turn as a separate content block after the history.
+        return SendMessageRequest(
+            role=initial_message.role,
+            content=[
+                TextContent(type='text', text=resume_text),
+                *initial_message.content,
+            ],
+            run=getattr(initial_message, 'run', None),
+        )
 
     async def _build_acp_start_conversation_request(
         self,
@@ -1545,15 +1904,14 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         selected_repository: str | None = None,
         plugins: list[PluginSpec] | None = None,
         api_secrets: dict[str, SecretStr] | None = None,
-    ) -> StartACPConversationRequest:
-        """Build a StartACPConversationRequest for ACP agent conversations.
+    ) -> StartConversationRequest:
+        """Build a StartConversationRequest for ACP agent conversations.
 
-        Unlike the LLM path, ACP agents run as separate subprocesses; we pass
-        credentials via environment variables rather than injecting an LLM object.
-
-        User secrets (Secrets panel + git provider tokens) are also passed through
-        ``AgentContext.secrets`` so the SDK renders a ``<CUSTOM_SECRETS>`` block
-        in the ACP prompt and injects values into the subprocess env at start time.
+        Provider creds (``llm.api_key`` / ``base_url``) and user secrets both
+        flow through ``AgentContext.secrets``. ``acp_settings.create_agent()``
+        folds the provider creds (keyed by env-var name, sdk#3464) into
+        ``agent_context.secrets``; the SDK gap-fills them into the subprocess
+        env at launch.
 
         Args:
             sandbox: Sandbox information
@@ -1587,42 +1945,28 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                     )
                 secrets[name] = StaticSecret(value=value)
 
+        # --- bootstrap-prompt resume (Solution A of issue #14260) -----------
+        # If this conversation has prior events in the durable store the sandbox
+        # was recycled and the ACP server's session storage is gone.  Synthesize
+        # the history as the opening content block so the agent has context.
+        resume_result = await self._synthesize_acp_resume_initial_message(
+            conversation_id, initial_message
+        )
+        if resume_result is not None:
+            initial_message = resume_result
+
         # --- build the ACP agent ------------------------------------------
         acp_settings = user.agent_settings  # already verified to be ACPAgentSettings
         assert isinstance(acp_settings, ACPAgentSettings)
 
-        # Merge provider env vars (API keys etc.) into acp_env.
-        # Priority (highest → lowest): acp_env > provider_env
-        provider_env = self._acp_provider_env(user)
-        merged_env: dict[str, str] = {
-            **provider_env,
-            **dict(acp_settings.acp_env or {}),
-        }
-
-        acp_agent = ACPAgent(
-            acp_command=acp_settings.acp_command,
-            acp_args=acp_settings.acp_args,
-            acp_env=merged_env,
-            acp_model=acp_settings.acp_model,
-            acp_session_mode=acp_settings.acp_session_mode,
-            acp_prompt_timeout=acp_settings.acp_prompt_timeout,
+        # acp_settings.create_agent() folds provider creds into agent_context.secrets
+        # (sdk#3464). Pass SecretSource objects verbatim — the SDK resolves them
+        # at subprocess launch, not here, to avoid eager LookupSecret calls.
+        agent_context = AgentContext(secrets=secrets) if secrets else None
+        settings_update = (
+            {'agent_context': agent_context} if agent_context is not None else {}
         )
-
-        # Pass user secrets via AgentContext so the SDK renders a
-        # <CUSTOM_SECRETS> block in the ACP prompt and injects values into
-        # the subprocess env at start time (SDK PR #2984).
-        # TODO: remove the _sdk_supports_acp_secrets guard once OpenHands pins
-        # to an SDK version that includes PR #2984 (secrets acp_compatible=True).
-        _sdk_supports_acp_secrets = (
-            AgentContext.model_fields.get('secrets') is not None
-            and isinstance(AgentContext.model_fields['secrets'].json_schema_extra, dict)
-            and AgentContext.model_fields['secrets'].json_schema_extra.get(
-                'acp_compatible'
-            )
-            is True
-        )
-        if secrets and _sdk_supports_acp_secrets:
-            acp_agent.agent_context = AgentContext(secrets=secrets)
+        acp_agent = acp_settings.model_copy(update=settings_update).create_agent()
 
         sdk_plugins: list[PluginSource] | None = None
         if plugins:
@@ -1631,15 +1975,26 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 for p in plugins
             ]
 
-        return StartACPConversationRequest(
-            workspace=workspace,
-            conversation_id=conversation_id,
-            initial_message=self._construct_initial_message_with_plugin_params(
-                initial_message, plugins
-            ),
-            secrets=secrets,
-            plugins=sdk_plugins,
-            agent=acp_agent,
+        # Mirror the regular path: populate ConversationSettings and delegate
+        # to create_request() so that max_iterations, confirmation_mode, and
+        # security_analyzer flow through to ACP conversations too.
+        conv_settings = user.conversation_settings.model_copy(
+            update={
+                'workspace': workspace,
+                'conversation_id': conversation_id,
+                'initial_message': self._construct_initial_message_with_plugin_params(
+                    initial_message, plugins
+                ),
+                'plugins': sdk_plugins,
+            }
+        )
+        # ``user_id`` is forwarded for observability; see the LLM path above
+        # for behavior on SDK versions that don't yet expose the field. We
+        # prefer email over the internal id so Laminar traces are immediately
+        # attributable, falling back to ``user.id`` when no email is available.
+        laminar_user_id = await self.user_context.get_user_email() or user.id
+        return conv_settings.create_request(
+            StartConversationRequest, agent=acp_agent, user_id=laminar_user_id
         )
 
     async def _process_pending_messages(
@@ -2087,10 +2442,6 @@ class LiveStatusAppConversationServiceInjector(AppConversationServiceInjector):
             'be retrieved by a sandboxed conversation.'
         ),
     )
-    tavily_api_key: SecretStr | None = Field(
-        default=None,
-        description='The Tavily Search API key to add to MCP integration',
-    )
 
     async def inject(
         self, state: InjectorState, request: Request | None = None
@@ -2140,7 +2491,7 @@ class LiveStatusAppConversationServiceInjector(AppConversationServiceInjector):
             # Get app_mode for SaaS mode
             app_mode = None
             try:
-                from openhands.server.shared import server_config
+                from openhands.app_server.shared import server_config
 
                 app_mode = (
                     server_config.app_mode.value if server_config.app_mode else None
@@ -2148,14 +2499,6 @@ class LiveStatusAppConversationServiceInjector(AppConversationServiceInjector):
             except (ImportError, AttributeError):
                 # If server_config is not available (e.g., in tests), continue without it
                 pass
-
-            # We supply the global tavily key only if the app mode is not SAAS, where
-            # currently the search endpoints are patched into the app server instead
-            # so the tavily key does not need to be shared
-            if self.tavily_api_key and app_mode != AppMode.SAAS:
-                tavily_api_key = self.tavily_api_key.get_secret_value()
-            else:
-                tavily_api_key = None
 
             yield LiveStatusAppConversationService(
                 init_git_in_empty_workspace=self.init_git_in_empty_workspace,
@@ -2176,5 +2519,4 @@ class LiveStatusAppConversationServiceInjector(AppConversationServiceInjector):
                 openhands_provider_base_url=config.openhands_provider_base_url,
                 access_token_hard_timeout=access_token_hard_timeout,
                 app_mode=app_mode,
-                tavily_api_key=tavily_api_key,
             )

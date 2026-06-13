@@ -21,7 +21,7 @@ from storage.org_store import OrgStore
 from storage.role_store import RoleStore
 from storage.user_store import UserStore
 
-from openhands.core.logger import openhands_logger as logger
+from openhands.app_server.utils.logger import openhands_logger as logger
 
 
 class OrgInvitationService:
@@ -386,7 +386,7 @@ class OrgInvitationService:
         # continue to flow through automatically.
         llm_api_key_secret = settings.agent_settings.llm.api_key
         llm_api_key = (
-            llm_api_key_secret.get_secret_value() if llm_api_key_secret else ''
+            llm_api_key_secret.get_secret_value() if llm_api_key_secret else ''  # type: ignore[union-attr]
         )
 
         await OrgMemberStore.add_user_to_org(
