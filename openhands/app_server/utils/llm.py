@@ -1,5 +1,6 @@
 import warnings
 
+import httpx
 from pydantic import BaseModel
 
 with warnings.catch_warnings():
@@ -81,31 +82,29 @@ class ModelsResponse(BaseModel):
     * ``verified_providers`` — provider names shown in the "Verified"
       section of the model selector.
     * ``default_model`` — the recommended default model id.
+    * ``hidden_models`` — ``provider/model`` strings that the backend still
+      serves but does not promote: they must not be offered as dropdown
+      options, yet an already-saved setting referencing one is still valid
+      (e.g. legacy alias routes on a managed LiteLLM proxy). Default empty,
+      so SaaS / default discovery behavior is unchanged.
+    * ``hidden_model_canonicals`` — maps a hidden ``provider/model`` string
+      to the visible ``provider/model`` it aliases, so clients can display a
+      saved hidden model under its canonical name. Only mappings whose
+      target is in ``models`` are included. Default empty, so SaaS / default
+      discovery behavior is unchanged.
     """
 
     models: list[str]
     verified_models: list[str]
     verified_providers: list[str]
     default_model: str
+    hidden_models: list[str] = []
+    hidden_model_canonicals: dict[str, str] = {}
 
 
 def is_openhands_model(model: str | None) -> bool:
-    """Check if the model uses the OpenHands provider.
-
-    The SDK's ``AgentSettings`` validator automatically transforms
-    ``openhands/X`` to ``litellm_proxy/X`` (the internal proxy name),
-    so both prefixes must be recognised.
-
-    Args:
-        model: The model name to check.
-
-    Returns:
-        True if the model starts with 'openhands/' or 'litellm_proxy/',
-        False otherwise.
-    """
-    return bool(
-        model and (model.startswith('openhands/') or model.startswith('litellm_proxy/'))
-    )
+    """Return True when the model uses the public OpenHands provider prefix."""
+    return bool(model and model.startswith('openhands/'))
 
 
 # Canonical masked placeholder for LLM API keys. Matches pydantic's
@@ -310,22 +309,27 @@ def remove_error_modelId(model_list: list[str]) -> list[str]:
 class HybridRouter:
     """
     Hybrid LLM Router for Antigravity & OpenHands.
-    Intelligently routes requests to local Ollama instances (e.g. Qwen3.6 MoE, CodeGeeX4) 
-    or falls back to cloud APIs (Gemini 3.1 Pro / Claude 4.7) based on task complexity and 
+    Intelligently routes requests to local Ollama instances (e.g. Qwen3.6 MoE, CodeGeeX4)
+    or falls back to cloud APIs (Gemini 3.1 Pro / Claude 4.7) based on task complexity and
     local hardware availability.
     """
-    def __init__(self, primary_local_model: str = "ollama/qwen3.6:35b-a3b-q4_K_M", fallback_cloud_model: str = "gemini-3.1-pro"):
+
+    def __init__(
+        self,
+        primary_local_model: str = 'ollama/qwen3.6:35b-a3b-q4_K_M',
+        fallback_cloud_model: str = 'gemini-3.1-pro',
+    ):
         self.primary_local = primary_local_model
         self.fallback_cloud = fallback_cloud_model
-        
+
     def _is_local_available(self) -> bool:
         """Check if local Ollama daemon is responsive and has the model."""
         try:
             # Assuming Ollama is on localhost:11434
-            resp = httpx.get("http://127.0.0.1:11434/api/tags", timeout=2)
+            resp = httpx.get('http://127.0.0.1:11434/api/tags', timeout=2)
             if resp.status_code == 200:
                 models = [m['name'] for m in resp.json().get('models', [])]
-                local_name = self.primary_local.replace("ollama/", "")
+                local_name = self.primary_local.replace('ollama/', '')
                 return local_name in models
         except Exception:
             pass
@@ -336,25 +340,29 @@ class HybridRouter:
         Execute an LLM completion, trying local VRAM-optimized models first.
         Falls back to Cloud models if local inference fails or is too complex.
         """
-        target_model = self.primary_local if self._is_local_available() else self.fallback_cloud
-        
+        target_model = (
+            self.primary_local if self._is_local_available() else self.fallback_cloud
+        )
+
         # Override target if complexity is high (e.g., architectural planning)
-        if kwargs.get("complexity", "standard") == "high":
-            logger.info("Task complexity is high. Bypassing local model for Cloud Reasoning.")
+        if kwargs.get('complexity', 'standard') == 'high':
+            logger.info(
+                'Task complexity is high. Bypassing local model for Cloud Reasoning.'
+            )
             target_model = self.fallback_cloud
-            
-        logger.info(f"HybridRouter executing completion using: {target_model}")
-        
+
+        logger.info(f'HybridRouter executing completion using: {target_model}')
+
         try:
             return await litellm.acompletion(
                 model=target_model,
                 messages=messages,
-                **{k: v for k, v in kwargs.items() if k != "complexity"}
+                **{k: v for k, v in kwargs.items() if k != 'complexity'},
             )
         except Exception as e:
-            logger.warning(f"Failed with {target_model}: {e}. Falling back to cloud.")
+            logger.warning(f'Failed with {target_model}: {e}. Falling back to cloud.')
             return await litellm.acompletion(
                 model=self.fallback_cloud,
                 messages=messages,
-                **{k: v for k, v in kwargs.items() if k != "complexity"}
+                **{k: v for k, v in kwargs.items() if k != 'complexity'},
             )
