@@ -6,6 +6,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     SerializationInfo,
     ValidationError,
     field_serializer,
@@ -13,18 +14,59 @@ from pydantic import (
     model_validator,
 )
 
-from openhands.core.logger import openhands_logger as logger
+from openhands.app_server.utils.llm import resolve_llm_base_url
+from openhands.app_server.utils.logger import openhands_logger as logger
 from openhands.sdk.llm import LLM
 
 # Standard Lena AI / Antigravity Hybrid Profiles
 DEFAULT_HYBRID_LOCAL_PROFILE = LLM(
-    model="ollama/qwen3.6:35b-a3b-q4_K_M",
-    base_url="http://127.0.0.1:11434"
+    model='ollama/qwen3.6:35b-a3b-q4_K_M', base_url='http://127.0.0.1:11434'
 )
-DEFAULT_CLOUD_REASONING_PROFILE = LLM(
-    model="gemini-3.1-pro",
-    api_key="MASKED"
-)
+DEFAULT_CLOUD_REASONING_PROFILE = LLM(model='gemini-3.1-pro', api_key='MASKED')
+
+
+def has_real_api_key(api_key: Any) -> bool:
+    """Return True iff ``api_key`` carries a non-empty value.
+
+    A ``SecretStr('')`` should report as *not set* — otherwise the UI tells
+    the user a key is stored when it isn't. Mirrors the check used in
+    ``Settings.llm_api_key_is_set``.
+    """
+    if api_key is None:
+        return False
+    secret_value = (
+        api_key.get_secret_value() if isinstance(api_key, SecretStr) else str(api_key)
+    )
+    return bool(secret_value and secret_value.strip())
+
+
+def resolve_profile_llm(
+    profile_llm: LLM,
+    *,
+    managed_proxy_url: str,
+    fallback_api_key: Any = None,
+) -> LLM:
+    """Resolve a saved profile's LLM for activation on the agent server.
+
+    Fills the provider-default ``base_url`` when the profile saved none, and
+    falls back to ``fallback_api_key`` (the user's effective settings key) when
+    the profile carries no real key. Managed profiles persist a masked key, so
+    without the fallback the agent server would call the LiteLLM proxy with no
+    credentials; BYOR profiles keep their own key (the fallback is skipped).
+    """
+    resolved = profile_llm.model_copy(
+        update={
+            'base_url': resolve_llm_base_url(
+                model=profile_llm.model,
+                base_url=profile_llm.base_url,
+                managed_proxy_url=managed_proxy_url,
+            )
+        }
+    )
+    if not has_real_api_key(resolved.api_key) and has_real_api_key(fallback_api_key):
+        resolved = resolved.model_copy(update={'api_key': fallback_api_key})
+    return resolved
+
 
 # Soft cap — keeps Settings payload bounded and blocks per-user storage
 # blow-ups. Tune if product requirements change.
@@ -134,19 +176,31 @@ class LLMProfiles(BaseModel):
     def has(self, name: str) -> bool:
         return name in self.profiles
 
-    def summaries(self) -> list[dict[str, Any]]:
+    def summaries(
+        self, *, managed_proxy_url: str | None = None
+    ) -> list[dict[str, Any]]:
         """Return a ``{name, model, base_url, api_key_set}`` dict per profile.
 
         ``api_key_set`` mirrors the ``llm_api_key_set`` convention the main
         settings endpoint already uses, so the frontend can render
         "key stored" vs. "needs key" without fetching each profile.
+
+        When ``managed_proxy_url`` is provided, ``base_url`` is resolved to the
+        value the profile will actually use at runtime for public OpenHands
+        provider profiles.
         """
         return [
             {
                 'name': name,
                 'model': llm.model,
-                'base_url': llm.base_url,
-                'api_key_set': llm.api_key is not None,
+                'base_url': (
+                    resolve_llm_base_url(
+                        llm.model, llm.base_url, managed_proxy_url=managed_proxy_url
+                    )
+                    if managed_proxy_url is not None
+                    else llm.base_url
+                ),
+                'api_key_set': has_real_api_key(llm.api_key),
             }
             for name, llm in self.profiles.items()
         ]
