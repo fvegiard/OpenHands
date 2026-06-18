@@ -12,7 +12,7 @@ class AntigravityAgentBridge:
     def __init__(self, workspace_uri: str, antigravity_agent_id: str):
         self.workspace_uri = workspace_uri
         self.antigravity_agent_id = antigravity_agent_id
-        self.openhands_session_id = None
+        self.openhands_session_id: str | None = None
 
     async def initialize_bridge(self) -> str:
         """
