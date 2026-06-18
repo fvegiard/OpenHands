@@ -7,13 +7,13 @@ from openhands.app_server.utils.llm import HybridRouter
 
 @pytest.fixture
 def mock_litellm():
-    with patch('openhands.utils.llm.litellm.acompletion') as mock:
+    with patch('openhands.app_server.utils.llm.litellm.acompletion') as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_httpx():
-    with patch('openhands.utils.llm.httpx.get') as mock:
+    with patch('openhands.app_server.utils.llm.httpx.get') as mock:
         yield mock
 
 
