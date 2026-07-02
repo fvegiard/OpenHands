@@ -29,5 +29,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/All-Hands-AI/OpenHands.git || true
           git fetch upstream main
-          git merge upstream/main --no-edit -m "Sync with upstream All-Hands-AI/OpenHands main"
+          git merge upstream/main --no-edit -X ours -m "Sync with upstream All-Hands-AI/OpenHands main"
           git push origin main
