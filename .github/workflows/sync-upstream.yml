@@ -12,15 +12,22 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Sync main with upstream All-Hands-AI/OpenHands
-        uses: actions/github-script@v7
+      - name: Setup Node.js 26
+        uses: actions/setup-node@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           node-version: 26
-          script: |
-            await github.rest.repos.mergeUpstream({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              branch: 'main',
-            });
-            console.log('Successfully synced main with upstream');
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync main with upstream All-Hands-AI/OpenHands
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/All-Hands-AI/OpenHands.git || true
+          git fetch upstream main
+          git merge upstream/main --no-edit -m "Sync with upstream All-Hands-AI/OpenHands main"
+          git push origin main
