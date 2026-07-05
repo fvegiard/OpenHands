@@ -12,14 +12,10 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup Node.js 26
-        uses: actions/setup-node@v4
-        with:
-          node-version: 26
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
 
@@ -29,5 +25,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/All-Hands-AI/OpenHands.git || true
           git fetch upstream main
-          git merge upstream/main --no-edit -X ours -m "Sync with upstream All-Hands-AI/OpenHands main"
-          git push origin main
+          git reset --hard upstream/main
+          git push --force-with-lease origin main
