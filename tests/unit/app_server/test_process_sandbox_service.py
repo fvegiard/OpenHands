@@ -244,10 +244,15 @@ class TestProcessSandboxService:
         assert status == SandboxStatus.PAUSED
 
     @patch('psutil.Process')
-    def test_get_process_status_starting(
+    def test_get_process_status_sleeping_is_running(
         self, mock_process_class, process_sandbox_service
     ):
-        """Test getting process status for starting process."""
+        """A live but idle (sleeping) server process is considered RUNNING.
+
+        A healthy long-lived agent server spends almost all of its time
+        sleeping on I/O, so sleeping must not be treated as still-starting.
+        Actual readiness is verified separately via the health check.
+        """
         mock_process = MagicMock()
         mock_process.is_running.return_value = True
         mock_process.status.return_value = psutil.STATUS_SLEEPING
@@ -264,7 +269,30 @@ class TestProcessSandboxService:
         )
 
         status = process_sandbox_service._get_process_status(process_info)
-        assert status == SandboxStatus.STARTING
+        assert status == SandboxStatus.RUNNING
+
+    @patch('psutil.Process')
+    def test_get_process_status_zombie_is_missing(
+        self, mock_process_class, process_sandbox_service
+    ):
+        """A zombie/dead process is reported as MISSING."""
+        mock_process = MagicMock()
+        mock_process.is_running.return_value = True
+        mock_process.status.return_value = psutil.STATUS_ZOMBIE
+        mock_process_class.return_value = mock_process
+
+        process_info = ProcessInfo(
+            pid=1234,
+            port=9000,
+            user_id='test-user-id',
+            working_dir='/tmp/test',
+            session_api_key='test-key',
+            created_at=datetime.now(),
+            sandbox_spec_id='test-spec',
+        )
+
+        status = process_sandbox_service._get_process_status(process_info)
+        assert status == SandboxStatus.MISSING
 
     @patch('psutil.Process')
     def test_get_process_status_access_denied(
@@ -287,8 +315,15 @@ class TestProcessSandboxService:
         assert status == SandboxStatus.MISSING
 
     @pytest.mark.asyncio
-    async def test_process_to_sandbox_info_error_status(self, process_sandbox_service):
-        """Test converting process info to sandbox info when server is not responding."""
+    async def test_process_to_sandbox_info_not_ready_is_starting(
+        self, process_sandbox_service
+    ):
+        """A live process whose health check is not yet 200 is STARTING.
+
+        While the agent server is still coming up the health endpoint is not
+        available; the sandbox must stay STARTING (so callers keep polling)
+        rather than flipping to ERROR.
+        """
         # Mock a process that's running but server is not responding
         with patch.object(
             process_sandbox_service,
@@ -314,13 +349,15 @@ class TestProcessSandboxService:
                 'test-sandbox', process_info
             )
 
-            assert sandbox_info.status == SandboxStatus.ERROR
+            assert sandbox_info.status == SandboxStatus.STARTING
             assert sandbox_info.session_api_key is None
             assert sandbox_info.exposed_urls is None
 
     @pytest.mark.asyncio
-    async def test_process_to_sandbox_info_exception(self, process_sandbox_service):
-        """Test converting process info to sandbox info when httpx raises exception."""
+    async def test_process_to_sandbox_info_exception_is_starting(
+        self, process_sandbox_service
+    ):
+        """A live process whose health check raises is STARTING, not ERROR."""
         # Mock a process that's running but httpx raises exception
         with patch.object(
             process_sandbox_service,
@@ -346,7 +383,7 @@ class TestProcessSandboxService:
                 'test-sandbox', process_info
             )
 
-            assert sandbox_info.status == SandboxStatus.ERROR
+            assert sandbox_info.status == SandboxStatus.STARTING
             assert sandbox_info.session_api_key is None
             assert sandbox_info.exposed_urls is None
 

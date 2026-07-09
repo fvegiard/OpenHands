@@ -181,19 +181,25 @@ class ProcessSandboxService(SandboxService):
         return False
 
     def _get_process_status(self, process_info: ProcessInfo) -> SandboxStatus:
-        """Get the status of a process."""
+        """Get the liveness status of a process.
+
+        A healthy, idle server process is typically reported by the OS as
+        ``sleeping`` (waiting on I/O), not ``running``. Treating only
+        ``STATUS_RUNNING`` as alive would leave every long-lived agent server
+        stuck in ``STARTING``, so any live, non-stopped process is considered
+        up here; actual readiness is confirmed via the health check in
+        :meth:`_process_to_sandbox_info`.
+        """
         try:
             process = psutil.Process(process_info.pid)
-            if process.is_running():
-                status = process.status()
-                if status == psutil.STATUS_RUNNING:
-                    return SandboxStatus.RUNNING
-                elif status == psutil.STATUS_STOPPED:
-                    return SandboxStatus.PAUSED
-                else:
-                    return SandboxStatus.STARTING
-            else:
+            if not process.is_running():
                 return SandboxStatus.MISSING
+            status = process.status()
+            if status in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+                return SandboxStatus.MISSING
+            if status == psutil.STATUS_STOPPED:
+                return SandboxStatus.PAUSED
+            return SandboxStatus.RUNNING
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return SandboxStatus.MISSING
 
@@ -207,7 +213,10 @@ class ProcessSandboxService(SandboxService):
         session_api_key = None
 
         if status == SandboxStatus.RUNNING:
-            # Check if server is actually responding
+            # The process is alive; confirm the agent server is actually
+            # responding before reporting RUNNING. While it is still coming up
+            # the health check will fail, in which case the sandbox is still
+            # STARTING (not ERROR) so callers keep polling instead of aborting.
             try:
                 url = replace_localhost_hostname_for_docker(
                     f'http://localhost:{process_info.port}{self.health_check_path}'
@@ -223,9 +232,9 @@ class ProcessSandboxService(SandboxService):
                     ]
                     session_api_key = process_info.session_api_key
                 else:
-                    status = SandboxStatus.ERROR
+                    status = SandboxStatus.STARTING
             except Exception:
-                status = SandboxStatus.ERROR
+                status = SandboxStatus.STARTING
 
         return SandboxInfo(
             id=sandbox_id,
