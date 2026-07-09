@@ -483,3 +483,23 @@ Called by `workspace.get_llm()` in the SDK to retrieve LLM config with the API k
 ### Personal project notes (no-code / vibe coding)
 
 If you are not writing code and want the agent to remember **your** product goals in plain language, use one Markdown file: follow `KNOWLEDGE_SETUP.md`. Copy `MY_PROJECT_KNOWLEDGE.example.md` to `MY_PROJECT_KNOWLEDGE.md` (gitignored) and edit that copy.
+
+## Cursor Cloud specific instructions
+
+This section is for Cloud Agents running on the isolated Linux VM (not a user's local machine). The startup update script only refreshes dependencies (`poetry install --with dev,test,runtime` and `frontend` `npm install`); everything below is context the update script does not handle.
+
+### Toolchain locations
+- Python 3.12 + Node 22 are preinstalled. Poetry (2.3.x) is installed at `~/.local/bin` (added to `~/.bashrc` `PATH`). If `poetry` is not found, run `export PATH="$HOME/.local/bin:$PATH"`.
+- Run the app exactly as documented above under "Running OpenHands with OpenHands" (`INSTALL_DOCKER=0`, `RUNTIME=local`, and `unset SESSION_API_KEY`). Docker is not installed; only the local runtime works here.
+
+### Gotcha: Poetry marker parsing on this kernel (`poetry install` fails)
+- The VM kernel release is `6.12.94+` (trailing `+`). Poetry evaluates the macOS-only `pyobjc` `platform_release` markers in `poetry.lock` and its `poetry-core` version cannot parse the trailing `+`, so `poetry install` aborts with `Could not parse version constraint: 6.12.94+`.
+- Fix applied in the VM snapshot: `RELEASE_PATTERN` in poetry's own `poetry-core` (`~/.local/share/pypoetry/venv/.../poetry/core/constraints/version/patterns.py`) was patched to also consume a trailing `(?:\+|-)?`. This is NOT a repo change. If poetry's venv is ever rebuilt and `poetry install` starts failing with that error, re-apply that one-line regex tweak.
+
+### Gotcha: V1 SQLite migration `013` breaks startup on a fresh DB
+- The OSS default DB is SQLite at `~/.openhands/openhands.db`. On startup the V1 app_server runs `alembic upgrade head`. Migration `013` calls `batch_op.create_index('ix_...', 'execution_status', ...)` with a string instead of a list; in SQLite batch mode this iterates the string and raises `DuplicateColumnError: A column with name 'e' is already present`, so the backend exits before serving.
+- Workaround used to provision a working DB WITHOUT editing repo code: run migrations to `012`, apply `013`'s intent manually (`ALTER TABLE conversation_metadata ADD COLUMN execution_status VARCHAR` + `CREATE INDEX ix_conversation_metadata_execution_status ON conversation_metadata (execution_status)`), `alembic stamp 013`, then `alembic upgrade head` (runs `014`). Do NOT use `Base.metadata.create_all()` as a shortcut — the ORM marks `created_by_user_id` non-null while migration `001` makes it nullable, which then breaks conversation creation.
+- Once `~/.openhands/openhands.db` is stamped at head it persists in the snapshot and startup migrations become a no-op, so the backend boots normally.
+
+### Gotcha: local `RUNTIME=local` sandbox never reaches RUNNING
+- Creating a conversation spawns a local agent-server (`python -m openhands.agent_server`), which is healthy on `/alive`. But `process_sandbox_service._get_process_status` only reports `RUNNING` when psutil status is `STATUS_RUNNING`; a healthy idle uvicorn is `STATUS_SLEEPING` (mapped to `STARTING`), so `wait_for_sandbox_running` times out after 120s and a live conversation UI never fully opens. Configuring settings and creating conversation records via the API/UI works; a full live agent turn in the local web UI does not (also requires a real LLM provider key).
