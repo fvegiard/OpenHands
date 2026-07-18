@@ -768,7 +768,9 @@ def _is_cross_app_relative_path(value: str) -> bool:
     if not value.startswith('/') or value.startswith('//'):
         return False
     parsed = urlparse(value)
-    return parsed.path == '/automations' or parsed.path.startswith('/automations/')
+    return parsed.path in ('/automations', '/canvas') or parsed.path.startswith(
+        ('/automations/', '/canvas/')
+    )
 
 
 def _merge_login_wrapper_query(inner_destination: str, outer_query: str) -> str:
@@ -791,14 +793,14 @@ def _build_cross_app_redirect_url(redirect_url: str, web_url: str) -> str:
 
     OAuth state often points back at the main app's ``/login`` page with the
     real destination nested inside ``returnTo`` or the legacy ``redirect`` query
-    parameter. For paths owned by another frontend, such as ``/automations``,
-    sending the browser through the main app SPA first is brittle: any old or
-    already-loaded bundle can client-navigate and show the main app 404 before
-    ingress sees the route.
+    parameter. For paths owned by another frontend, such as ``/automations`` or
+    ``/canvas``, sending the browser through the main app SPA first is brittle:
+    any old or already-loaded bundle can client-navigate and show the main app
+    404 before ingress sees the route.
 
-    Returning a direct ``Location: <web_url>/automations...`` from the backend
+    Returning a direct ``Location: <web_url>/<cross-app>...`` from the backend
     makes the browser issue a real document request, so ingress routes it to the
-    automation service.
+    owning service.
     """
     if not redirect_url:
         return redirect_url

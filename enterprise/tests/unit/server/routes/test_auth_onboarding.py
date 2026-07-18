@@ -348,6 +348,23 @@ class TestBuildCrossAppRedirectUrl:
 
         assert result == 'https://example.com/automations'
 
+    def test_unwraps_login_return_to_canvas_deep_link(self):
+        result = _build_cross_app_redirect_url(
+            'https://example.com/login'
+            '?returnTo=%2Fcanvas%2Fconversations%2Fabc'
+            '&login_method=github',
+            'https://example.com',
+        )
+
+        assert result == (
+            'https://example.com/canvas/conversations/abc?login_method=github'
+        )
+
+    def test_direct_canvas_path_becomes_same_origin_absolute_url(self):
+        result = _build_cross_app_redirect_url('/canvas', 'https://example.com')
+
+        assert result == 'https://example.com/canvas'
+
     def test_non_automation_login_redirect_is_unchanged(self):
         result = _build_cross_app_redirect_url(
             'https://example.com/login?redirect=%2Fsettings&login_method=github',

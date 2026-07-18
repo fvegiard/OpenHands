@@ -2,7 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { I18nKey } from "#/i18n/declaration";
 
-const RELOAD_SENTINEL_KEY = "openhands:automations-cross-app-reload";
+const RELOAD_SENTINEL_KEY = "openhands:cross-app-reload";
 
 export default function CrossAppRedirect() {
   const { t } = useTranslation();
