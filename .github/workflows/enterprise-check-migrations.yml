@@ -22,7 +22,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -108,7 +108,7 @@ jobs:
       DB_NAME: openhands
       DB_DRIVER: ${{ matrix.db-driver }}  # pg8000 for prod parity, "" for psycopg2
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install poetry via pipx
         run: pipx install poetry
       - name: Set up Python
