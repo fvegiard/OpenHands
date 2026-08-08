@@ -38,11 +38,13 @@ UPSTREAM_RE = re.compile(
 DISABLED_PUSH = 'DISABLED'
 
 # Dangerous workflow operations: automatic upstream sync or push-to-main.
+# The push pattern is intentionally broad (any `git push ... main ...`) so
+# refspec variations like `HEAD:refs/heads/main` cannot slip through.
 DANGER_PATTERNS = [
     re.compile(r'git\s+merge\s+upstream', re.IGNORECASE),
     re.compile(r'git\s+rebase\s+upstream', re.IGNORECASE),
-    re.compile(r'git\s+push\s+\S+\s+(?:HEAD:)?main\b', re.IGNORECASE),
-    re.compile(r'git\s+push\s+\S+\s+\S+:main\b', re.IGNORECASE),
+    re.compile(r'git\s+pull\s+upstream', re.IGNORECASE),
+    re.compile(r'git\s+push\b[^\n]*\bmain\b', re.IGNORECASE),
 ]
 
 
