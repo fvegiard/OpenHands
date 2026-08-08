@@ -115,9 +115,13 @@ class TestProcessSandboxService:
         mock_response.json.return_value = {'status': 'ok'}
         process_sandbox_service.httpx_client.get.return_value = mock_response
 
-        # Even if docker detection reports True, the URL must stay on loopback.
+        # Force docker detection True at the exact name the docker-host rewrite
+        # binds (docker_utils.is_running_in_docker). If the readiness path ever
+        # reintroduces replace_localhost_hostname_for_docker, the URL would flip
+        # to host.docker.internal and this assertion fails. This makes the guard
+        # deterministic even off-docker (e.g. in CI, which has no /.dockerenv).
         with patch(
-            'openhands.app_server.utils.environment.is_running_in_docker',
+            'openhands.app_server.utils.docker_utils.is_running_in_docker',
             return_value=True,
         ):
             result = await process_sandbox_service._wait_for_server_ready(
@@ -138,10 +142,16 @@ class TestProcessSandboxService:
         mock_response.status_code = 200
         process_sandbox_service.httpx_client.get.return_value = mock_response
 
-        with patch.object(
-            process_sandbox_service,
-            '_get_process_status',
-            return_value=SandboxStatus.RUNNING,
+        with (
+            patch.object(
+                process_sandbox_service,
+                '_get_process_status',
+                return_value=SandboxStatus.RUNNING,
+            ),
+            patch(
+                'openhands.app_server.utils.docker_utils.is_running_in_docker',
+                return_value=True,
+            ),
         ):
             process_info = ProcessInfo(
                 pid=1234,
