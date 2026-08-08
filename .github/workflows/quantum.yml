@@ -23,16 +23,18 @@ jobs:
   green:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      # pnpm must exist before setup-node's `cache: pnpm` step can resolve it.
-      - uses: pnpm/action-setup@v4
+      # pnpm (repo-pinned) MUST be installed before setup-node initializes its
+      # pnpm cache, otherwise setup-node fails with "Unable to locate executable
+      # file: pnpm".
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.18.2
 
       # Latest Node 22.x. The code uses the built-in node:sqlite module, which
       # is only available on Node >= 22.13, so the exact 22.12.0 patch fails.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: pnpm
@@ -42,27 +44,27 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint (biome, zero warnings)
-        run: ./node_modules/.bin/biome check .
+        run: pnpm exec biome check .
 
       - name: Type-check (tsc)
-        run: ./node_modules/.bin/tsc -p tsconfig.json --noEmit
+        run: pnpm exec tsc -p tsconfig.json --noEmit
 
       - name: Test (vitest)
-        run: ./node_modules/.bin/vitest run
+        run: pnpm exec vitest run
 
       - name: Verify README contract
-        run: ./node_modules/.bin/tsx src/cli.ts verify
+        run: pnpm exec tsx src/cli.ts verify
 
   # Full compatibility lane: Node 26 on Linux. Identical suite; non-gating.
   green-node26-compat:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.18.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "26"
           cache: pnpm
@@ -82,11 +84,11 @@ jobs:
     runs-on: windows-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.18.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "26"
           cache: pnpm
