@@ -71,9 +71,12 @@ cmd_start() {
   export INSTALL_DOCKER=0 RUNTIME=local
   unset SESSION_API_KEY 2>/dev/null || true
   # Free the ports first so restart is idempotent (bounded, by PID).
+  local pids pid
   for p in "$BACKEND_PORT" "$FRONTEND_PORT"; do
-    local pids; pids=$(lsof -ti tcp:"$p" 2>/dev/null || true)
-    [ -n "$pids" ] && kill $pids 2>/dev/null || true
+    pids=$(lsof -ti tcp:"$p" 2>/dev/null || true)
+    for pid in $pids; do
+      kill "$pid" 2>/dev/null || true
+    done
   done
   # Fully detach: new session, stdio to the log, stdin from /dev/null. This
   # keeps the long-running frontend dev server from holding the caller's
@@ -164,7 +167,11 @@ run_check() { # name cmd  -> echoes status, records timing
   t1=$(date +%s%3N)
   local status="PASS"; [ $rc -ne 0 ] && status="FAIL"
   record "$name" "$status" "$(( t1 - t0 ))" "$(echo "$out" | tail -1 | tr '"' "'" )"
-  [ "$status" = "PASS" ] && c_green "  [PASS] $name (${R_MS[-1]}ms)" || c_red "  [FAIL] $name (${R_MS[-1]}ms): ${R_DETAIL[-1]}"
+  if [ "$status" = "PASS" ]; then
+    c_green "  [PASS] $name (${R_MS[-1]}ms)"
+  else
+    c_red "  [FAIL] $name (${R_MS[-1]}ms): ${R_DETAIL[-1]}"
+  fi
   return $rc
 }
 
@@ -225,7 +232,7 @@ cmd_doctor() {
     cmd_start >/dev/null 2>&1 || true
     if run_check backend-rerun chk_backend; then
       # Transient healed: relabel the original failure so it is not terminal.
-      R_STATUS[$backend_idx]="REPAIRED"
+      R_STATUS[backend_idx]="REPAIRED"
     fi
   fi
   run_check frontend      chk_frontend || true

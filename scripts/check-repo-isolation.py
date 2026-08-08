@@ -76,22 +76,40 @@ def check_remotes(violations: list[str]) -> None:
             )
 
 
+SCHEDULE_RE = re.compile(r'^\s*(schedule\s*:|-\s*cron\s*:)', re.IGNORECASE)
+
+
 def check_workflows(repo_root: Path, violations: list[str]) -> None:
     wf_dir = repo_root / '.github' / 'workflows'
     if not wf_dir.is_dir():
         return
+
+    # Regression assertion: the upstream-sync workflow must never come back.
+    if (wf_dir / 'sync-upstream.yml').exists():
+        violations.append(
+            '.github/workflows/sync-upstream.yml is present (upstream-sync workflow '
+            'reintroduced - it must stay deleted)'
+        )
+
     for wf in sorted(wf_dir.glob('*.yml')) + sorted(wf_dir.glob('*.yaml')):
         text = wf.read_text(encoding='utf-8')
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith('#'):
-                continue
+        lines = [ln for ln in text.splitlines() if not ln.strip().startswith('#')]
+        has_schedule = any(SCHEDULE_RE.search(ln) for ln in lines)
+        has_danger = False
+        for stripped in (ln.strip() for ln in lines):
             for pat in DANGER_PATTERNS:
                 if pat.search(stripped):
+                    has_danger = True
                     violations.append(
                         f'{wf.relative_to(repo_root)}: auto upstream-sync / '
                         f'push-to-main operation: `{stripped}`'
                     )
+        # Explicit regression assertion: schedule + upstream merge/push combo.
+        if has_schedule and has_danger:
+            violations.append(
+                f'{wf.relative_to(repo_root)}: scheduled upstream merge/push behavior '
+                '(a cron/schedule trigger combined with an upstream sync or push-to-main)'
+            )
 
 
 def main() -> int:

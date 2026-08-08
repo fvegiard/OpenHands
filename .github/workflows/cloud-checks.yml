@@ -22,18 +22,21 @@ jobs:
   cloud-checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      # Repository isolation gate: fails if a writable upstream remote or an
-      # automatic upstream-sync / push-to-main workflow is (re)introduced.
+      # Repository isolation gate: fails if a writable upstream remote is added,
+      # sync-upstream.yml reappears, or any workflow does an upstream merge/push
+      # (including a scheduled one).
       - name: Repository isolation
         run: python3 scripts/check-repo-isolation.py
 
-      - name: Shell syntax + shellcheck (doctor CLI)
+      # Real gate (no masking): default severity, non-zero on ANY finding.
+      # ubuntu-latest ships shellcheck, so no apt-get is needed.
+      - name: Shellcheck (real gate, zero findings)
         run: |
+          shellcheck --version
           bash -n scripts/openhands-cloud
-          sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck -S warning scripts/openhands-cloud || true  # style-only; not a gate
+          shellcheck scripts/openhands-cloud
 
       - name: CLI help + skill-validate self-test
         run: |
