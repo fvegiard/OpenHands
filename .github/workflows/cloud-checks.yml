@@ -1,0 +1,40 @@
+name: cloud-checks
+
+# Lightweight gate for the openhands-cloud control surface and the .agents/skills
+# registry. Backend unit tests (including tests/unit/app_server) run in
+# py-tests.yml; the quantum-agent suite runs in quantum.yml. This workflow only
+# covers the scopes those two do not: the doctor CLI script and skill format.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/openhands-cloud"
+      - ".agents/skills/**"
+      - ".github/workflows/cloud-checks.yml"
+  pull_request:
+    paths:
+      - "scripts/openhands-cloud"
+      - ".agents/skills/**"
+      - ".github/workflows/cloud-checks.yml"
+
+jobs:
+  cloud-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax + shellcheck (doctor CLI)
+        run: |
+          bash -n scripts/openhands-cloud
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck -S warning scripts/openhands-cloud || true  # style-only; not a gate
+
+      - name: CLI help + skill-validate self-test
+        run: |
+          scripts/openhands-cloud help
+          # Every committed .agents/skills SKILL.md must pass format validation.
+          fail=0
+          while IFS= read -r -d '' f; do
+            scripts/openhands-cloud skill-validate "$f" || fail=1
+          done < <(find .agents/skills -name SKILL.md -print0)
+          exit "$fail"

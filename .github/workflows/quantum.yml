@@ -17,33 +17,27 @@ defaults:
     shell: bash
 
 jobs:
+  # Required stable lane: Node 22.12+ (the supported default). Deterministic
+  # frozen-lockfile install + the full green gate (lint, typecheck, test,
+  # README verify).
   green:
     runs-on: ubuntu-latest
-    env:
-      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      MISE_PYTHON_GITHUB_ATTESTATIONS: "false"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mise + toolchain (.mise.toml)
-        uses: jdx/mise-action@v2
+      - uses: actions/setup-node@v4
         with:
-          version: 2026.5.5
-          experimental: true
-          install_dir: ${{ github.workspace }}/quantum-agent
-          working_directory: quantum-agent
+          node-version: "22.12.0"
+          cache: pnpm
+          cache-dependency-path: quantum-agent/pnpm-lock.yaml
 
-      - name: Verify toolchain
-        run: |
-          which pnpm && pnpm --version
-          which node && node --version
-          which biome 2>/dev/null && biome --version || true
+      - name: Enable corepack (pnpm@10.18.2 from packageManager)
+        run: corepack enable && corepack prepare pnpm@10.18.2 --activate
 
-      - name: pnpm install
-        run: pnpm install --no-frozen-lockfile
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
 
-      - name: Lint (biome)
+      - name: Lint (biome, zero warnings)
         run: ./node_modules/.bin/biome check .
 
       - name: Type-check (tsc)
@@ -54,3 +48,21 @@ jobs:
 
       - name: Verify README contract
         run: ./node_modules/.bin/tsx src/cli.ts verify
+
+  # Full compatibility lane: Node 26. Runs the identical suite but does not gate
+  # the merge (Node 26 is not the supported default). Do not claim Node 26
+  # support unless this lane is green.
+  green-node26-compat:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      - run: corepack enable && corepack prepare pnpm@10.18.2 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: ./node_modules/.bin/biome check .
+      - run: ./node_modules/.bin/tsc -p tsconfig.json --noEmit
+      - run: ./node_modules/.bin/vitest run
+      - run: ./node_modules/.bin/tsx src/cli.ts verify
