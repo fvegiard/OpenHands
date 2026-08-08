@@ -23,7 +23,13 @@ import {
 } from "./providers/registry.ts";
 import { start as startServer } from "./server.ts";
 import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skills/generate.ts";
-import { install, listInstalled, searchInstalled, translateSkill } from "./skills/manager.ts";
+import {
+  install,
+  listInstalled,
+  searchInstalled,
+  syncSkills,
+  translateSkill,
+} from "./skills/manager.ts";
 import { startTui } from "./tui/app.tsx";
 import { verifyReadme } from "./verify.ts";
 import { listWorkflows } from "./workflows/index.ts";
@@ -187,6 +193,15 @@ skill
   .option("--to <fmt>", "target format", "openclaw")
   .action((name: string, opts: { to: string }) => {
     console.log(translateSkill(name, opts.to as any));
+  });
+skill
+  .command("sync")
+  .description("Regenerate .agents/skills/* from skills-core (single source of truth).")
+  .option("--target <dir>", "target directory", "../.agents/skills")
+  .action((opts: { target: string }) => {
+    const r = syncSkills(opts.target);
+    console.log(`synced ${r.written.length} skills from ${r.source} -> ${r.target}`);
+    for (const f of r.written) console.log(`- ${f}`);
   });
 skill.command("new <description...>").action((parts: string[]) => {
   const description = parts.join(" ");

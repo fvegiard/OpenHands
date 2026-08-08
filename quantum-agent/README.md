@@ -55,6 +55,7 @@ quantum skill install --pack claude-code-essentials   # +30
 quantum skill list
 quantum skill translate hyperplan --to openclaw
 quantum skill new "summarise PRs nightly to slack"    # meta-skill writes a new skill
+quantum skill sync                                    # expose skills-core via .agents/skills
 ```
 
 Sources (configured in `skills.sources.toml`):

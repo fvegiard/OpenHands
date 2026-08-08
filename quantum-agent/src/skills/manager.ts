@@ -1,8 +1,8 @@
 // Skill manager — install / search / list / update / translate / pack.
 // Source-specific drivers live under sources/.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { execa } from "execa";
 import { discover, loadBody, type SkillBody, type SkillManifest } from "./loader.ts";
 import { findPack, type Pack, parseSourcesFile } from "./sources.ts";
@@ -117,6 +117,44 @@ export async function install(spec: string, target = "./skills"): Promise<Instal
 
 export async function update(_all = false): Promise<{ updated: string[] }> {
   return { updated: [] };
+}
+
+export interface SyncResult {
+  target: string;
+  written: string[];
+  source: string;
+}
+
+/**
+ * Expose the canonical skills-core skills to Cursor Cloud agents through the
+ * `.agents/skills` convention. `skills-core/` stays the single source of truth;
+ * each `.agents/skills/<name>/SKILL.md` is a regenerated in-sync copy carrying a
+ * provenance banner (not a symlink, not a hand-edited divergent duplicate).
+ * Re-run after editing a source skill.
+ */
+export function syncSkills(
+  target = resolve(process.cwd(), "..", ".agents", "skills"),
+  sourceDir = "./skills-core",
+): SyncResult {
+  const written: string[] = [];
+  const manifests = discover([sourceDir]);
+  for (const m of manifests) {
+    const name = m.frontmatter.name;
+    if (!name || name === "unknown") continue;
+    const raw = readFileSync(m.path, "utf8");
+    const fmEnd = raw.indexOf("\n---", 3);
+    if (fmEnd === -1) continue;
+    const head = raw.slice(0, fmEnd + 4); // through the closing '---'
+    const body = raw.slice(fmEnd + 4);
+    const banner =
+      `\n\n> Generated from \`quantum-agent/${sourceDir.replace(/^\.\//, "")}/${name}/SKILL.md\`` +
+      " by `quantum skill sync`. Edit the source, not this copy.\n";
+    const dest = join(target, name);
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(join(dest, "SKILL.md"), head + banner + body);
+    written.push(join(dest, "SKILL.md"));
+  }
+  return { target, written, source: sourceDir };
 }
 
 export function translateSkill(name: string, to: TargetFormat): string {
