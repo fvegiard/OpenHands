@@ -65,23 +65,46 @@ else
 fi
 kill "$FOREIGN" 2>/dev/null || true
 
-echo "== test: stop only touches OUR tracked process group =="
-# Owned group: a setsid sleep whose leader pid == pgid, recorded in PIDFILE.
+echo "== test: stop terminates+reaps OUR group and preserves a foreign process =="
+# Owned group: a setsid sleep (its own group leader); record durable state.
 setsid bash -c 'sleep 60' &
 OWNED=$!
-mkdir -p "$OHC_RUNTIME_DIR"
-echo "$OWNED" >"$OHC_RUNTIME_DIR/app.pgid"
+sleep 0.3
+write_state "$OWNED"
 # A separate foreign sleep that must survive stop.
 sleep 60 &
 FOREIGN2=$!
 cmd_stop >/dev/null 2>&1 || true
 sleep 1
-if ! kill -0 "$OWNED" 2>/dev/null && kill -0 "$FOREIGN2" 2>/dev/null; then
-  pass "stop killed the owned group and preserved the foreign process"
+if ! proc_alive "$OWNED" && proc_alive "$FOREIGN2"; then
+  pass "stop killed+reaped the owned group and preserved the foreign process"
 else
   fail "stop did not correctly scope to the owned group"
 fi
 kill "$FOREIGN2" 2>/dev/null || true
+
+echo "== test: stop REFUSES a stale/reused PID (start-identity mismatch) =="
+# Craft a state whose leader_pid is alive but with a WRONG start-time (as if the
+# PID were reused by an unrelated process). stop must refuse and not kill it.
+sleep 60 &
+INNOCENT=$!
+sleep 0.3
+OHC_L="$INNOCENT" OHC_G="$(pgid_of "$INNOCENT")" OHC_N="nonce-x" OHC_S="99999999" \
+  OHC_R="$(cd "$HERE/.." && pwd)" OHC_F="$OHC_RUNTIME_DIR/app.state.json" python3 -c '
+import json, os
+os.makedirs(os.path.dirname(os.environ["OHC_F"]), exist_ok=True)
+json.dump({"leader_pid":os.environ["OHC_L"],"pgid":os.environ["OHC_G"],
+           "nonce":os.environ["OHC_N"],"leader_starttime":os.environ["OHC_S"],
+           "repo":os.environ["OHC_R"],"created_at":"x"}, open(os.environ["OHC_F"],"w"))
+'
+cmd_stop >/dev/null 2>&1 || true
+sleep 0.3
+if proc_alive "$INNOCENT"; then
+  pass "stop refused the reused-PID state and left the innocent process alive"
+else
+  fail "stop killed a process on a stale/reused-PID state"
+fi
+kill "$INNOCENT" 2>/dev/null || true
 
 echo "== test: pnpm resolves from PATH without Corepack (Node26 no-corepack) =="
 mkdir -p "$TMP/fakebin"
