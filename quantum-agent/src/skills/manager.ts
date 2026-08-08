@@ -39,28 +39,45 @@ export interface InstallResult {
   notes: string[];
 }
 
+function writeOfflinePlaceholder(repo: string, dest: string): void {
+  ensureDir(dest);
+  writeFileSync(
+    join(dest, "SKILL.md"),
+    `---\nname: ${repo.replace(/.*\//, "")}\ndescription: placeholder for ${repo} (offline install)\n---\n# ${repo}\n\nRe-run \`quantum skill install gh:${repo}\` when network is available.\n`,
+  );
+}
+
+/** Skip the network clone (hermetic/deterministic) when explicitly requested. */
+function offlineSkills(): boolean {
+  const v = process.env.QUANTUM_SKILLS_OFFLINE;
+  return v === "1" || v === "true";
+}
+
 async function installGh(spec: string, target: string): Promise<InstallResult> {
   const repo = spec.slice(3);
   const dest = join(target, repo.replace(/[^a-z0-9._-]/gi, "-"));
   if (existsSync(dest)) {
     return { installed: [], skipped: [dest], notes: [`already installed: ${dest}`] };
   }
+  // Offline mode: never touch the network. Keeps unit tests deterministic and
+  // fast (no live git clone) on every platform, including Windows where a slow
+  // clone otherwise blows the test timeout.
+  if (offlineSkills()) {
+    writeOfflinePlaceholder(repo, dest);
+    return { installed: [dest], skipped: [], notes: [`offline mode: wrote placeholder for ${repo}`] };
+  }
   try {
     await execa("git", ["clone", "--depth", "1", `https://github.com/${repo}.git`, dest], {
       timeout: 120_000,
       // Never block on a credential prompt: without this, a private/missing
       // repo makes `git clone` hang until the timeout on Windows (Git Credential
-      // Manager pops an interactive prompt), which fails the pack:default test.
-      // With prompts disabled git fails fast and we write the offline placeholder.
+      // Manager pops an interactive prompt). With prompts disabled git fails fast
+      // and we write the offline placeholder.
       env: { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", GCM_INTERACTIVE: "never" },
     });
     return { installed: [dest], skipped: [], notes: [] };
   } catch (err) {
-    ensureDir(dest);
-    writeFileSync(
-      join(dest, "SKILL.md"),
-      `---\nname: ${repo.replace(/.*\//, "")}\ndescription: placeholder for ${repo} (offline install)\n---\n# ${repo}\n\nRe-run \`quantum skill install gh:${repo}\` when network is available.\n`,
-    );
+    writeOfflinePlaceholder(repo, dest);
     return {
       installed: [dest],
       skipped: [],

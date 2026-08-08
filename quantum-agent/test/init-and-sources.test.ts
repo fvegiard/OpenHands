@@ -6,9 +6,20 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { install } from "../src/skills/manager.ts";
 import { parseSourcesFile } from "../src/skills/sources.ts";
+
+// Pack-install resolution is what these tests verify — not live git clones.
+// Run hermetically (no network) so they are deterministic and fast on every
+// platform (a live clone otherwise exceeds the test timeout on Windows).
+// Assertions are unchanged.
+beforeAll(() => {
+  process.env.QUANTUM_SKILLS_OFFLINE = "1";
+});
+afterAll(() => {
+  delete process.env.QUANTUM_SKILLS_OFFLINE;
+});
 
 describe("init / pack install (finding #4)", () => {
   it("install('pack:default') resolves to gh: specs without throwing", async () => {
