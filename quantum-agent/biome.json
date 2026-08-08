@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
   "files": {
     "includes": ["**", "!**/node_modules", "!**/dist", "!**/.quantum", "!**/skills", "!**/coverage"]
   },
@@ -13,7 +13,6 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
       "suspicious": { "noExplicitAny": "off" },
       "style": { "noNonNullAssertion": "off" },
       "complexity": { "noBannedTypes": "off" }

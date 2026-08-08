@@ -9,7 +9,7 @@
 // or secret is missing we report the exact package/secret needed instead of
 // silently falling back.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { getPaths } from "../config.ts";
