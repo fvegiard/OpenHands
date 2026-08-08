@@ -30,9 +30,11 @@ jobs:
         with:
           version: 10.18.2
 
+      # Latest Node 22.x. The code uses the built-in node:sqlite module, which
+      # is only available on Node >= 22.13, so the exact 22.12.0 patch fails.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.12.0"
+          node-version: "22"
           cache: pnpm
           cache-dependency-path: quantum-agent/pnpm-lock.yaml
 
