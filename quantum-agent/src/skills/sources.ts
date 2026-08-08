@@ -5,7 +5,7 @@
 // optional `[packs]` table in the TOML.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 export type SourceType = "skillkit" | "http" | "git" | "local";
 
@@ -110,7 +110,9 @@ export function parseSources(path = DEFAULT_SOURCES_FILE): Source[] {
 
 export function parseSourcesFile(path = DEFAULT_SOURCES_FILE): SourcesFile {
   // Allow callers to pass an absolute path verbatim (used in tests).
-  const full = path.startsWith("/") ? path : join(process.cwd(), path);
+  // Use isAbsolute (not startsWith("/")) so Windows drive paths like
+  // C:\...\skills.sources.toml are recognized instead of being joined onto cwd.
+  const full = isAbsolute(path) ? path : join(process.cwd(), path);
   if (!existsSync(full)) return { sources: [], packs: [] };
   const raw = readFileSync(full, "utf8");
   const { body, packsBody } = splitOnPacks(raw);

@@ -9,7 +9,7 @@
 //   - Bash: defer to PreToolUse hard-deny patterns; otherwise allow inside cwd.
 //   - Anything else: ask (the SDK shows a prompt; in headless contexts this denies).
 
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 export type Permission =
   | { behavior: "allow"; updatedInput?: Record<string, unknown> }
@@ -32,8 +32,13 @@ const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 function isInsideProject(targetPath: string, root: string): boolean {
   if (!targetPath) return false;
-  const abs = resolve(targetPath);
-  return abs.startsWith(`${root}/`) || abs === root;
+  // Compare via path.relative so this is correct on both POSIX and Windows.
+  // A hardcoded `${root}/` check breaks on Windows, where resolve() yields
+  // backslash-separated paths (e.g. C:\home\user\quantum-test), so an in-root
+  // edit is wrongly rejected. Inside-root => relative path is "" or does not
+  // escape upward and is not absolute (a different drive on Windows).
+  const rel = relative(root, resolve(targetPath));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 export function buildCanUseTool(opts: { projectRoot?: string } = {}) {

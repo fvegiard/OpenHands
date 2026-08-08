@@ -48,6 +48,11 @@ async function installGh(spec: string, target: string): Promise<InstallResult> {
   try {
     await execa("git", ["clone", "--depth", "1", `https://github.com/${repo}.git`, dest], {
       timeout: 120_000,
+      // Never block on a credential prompt: without this, a private/missing
+      // repo makes `git clone` hang until the timeout on Windows (Git Credential
+      // Manager pops an interactive prompt), which fails the pack:default test.
+      // With prompts disabled git fails fast and we write the offline placeholder.
+      env: { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", GCM_INTERACTIVE: "never" },
     });
     return { installed: [dest], skipped: [], notes: [] };
   } catch (err) {
