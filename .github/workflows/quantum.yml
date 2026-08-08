@@ -25,14 +25,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm must exist before setup-node's `cache: pnpm` step can resolve it.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22.12.0"
           cache: pnpm
           cache-dependency-path: quantum-agent/pnpm-lock.yaml
-
-      - name: Enable corepack (pnpm@10.18.2 from packageManager)
-        run: corepack enable && corepack prepare pnpm@10.18.2 --activate
 
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
@@ -57,10 +59,14 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
       - uses: actions/setup-node@v4
         with:
           node-version: "26"
-      - run: corepack enable && corepack prepare pnpm@10.18.2 --activate
+          cache: pnpm
+          cache-dependency-path: quantum-agent/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: ./node_modules/.bin/biome check .
       - run: ./node_modules/.bin/tsc -p tsconfig.json --noEmit
