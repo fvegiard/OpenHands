@@ -11,6 +11,16 @@ import * as cache from "./cache/index.ts";
 import { lastSession } from "./memory.ts";
 import { see } from "./modal/vision.ts";
 import { transcribe } from "./modal/voice-in.ts";
+import {
+  CAPABILITIES,
+  persistSelection,
+  providerTest,
+  REGISTRY,
+  RuntimeId,
+  resolveRuntimeConfig,
+  runtimeStatus,
+  validateProvider,
+} from "./providers/registry.ts";
 import { start as startServer } from "./server.ts";
 import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skills/generate.ts";
 import { install, listInstalled, searchInstalled, translateSkill } from "./skills/manager.ts";
@@ -189,6 +199,81 @@ skill.command("new <description...>").action((parts: string[]) => {
   const after = verifyAfter();
   console.log(`wrote ${file.path} (${file.bytes} bytes); verify=${after.ok ? "ok" : "drift"}`);
 });
+
+const provider = program
+  .command("provider")
+  .description("Select and test the agent runtime/provider (claude | openai-agents | codex).");
+provider
+  .command("list")
+  .description("List known runtimes with the package + secret each requires.")
+  .action(async () => {
+    const cfg = resolveRuntimeConfig();
+    for (const id of RuntimeId.options) {
+      const st = await runtimeStatus(id, cfg.runtime);
+      const mark = st.selected ? "*" : " ";
+      console.log(
+        `${mark} ${id.padEnd(14)} ${st.installed ? "installed" : "not-installed"}  ` +
+          `secret=${st.secretPresent ? "set" : `[${st.secretEnvChecked.join("|")}]`}  ` +
+          `providers=${REGISTRY[id].providers.join(",")}`,
+      );
+    }
+  });
+provider
+  .command("status")
+  .description("Show the selected runtime, model, availability and capability matrix.")
+  .action(async () => {
+    const cfg = resolveRuntimeConfig();
+    const st = await runtimeStatus(cfg.runtime, cfg.runtime);
+    const spec = REGISTRY[cfg.runtime];
+    console.log(`runtime  = ${cfg.runtime}${st.selected ? " (selected)" : ""}`);
+    console.log(`provider = ${cfg.provider ?? "(default)"}`);
+    console.log(`model    = ${cfg.model}`);
+    console.log(
+      `installed= ${st.installed}${st.installed ? "" : ` (need: ${st.missingPackages.join(", ")})`}`,
+    );
+    console.log(
+      `secret   = ${st.secretPresent ? "present" : `missing (set one of: ${st.missingSecretNames.join(", ")})`}`,
+    );
+    console.log(`unattended-permission = ${spec.unattendedPermissionMode}`);
+    console.log(`claude-coupled = ${spec.claudeCoupled}`);
+    console.log(`capabilities = ${CAPABILITIES.filter((c) => spec.capabilities[c]).join(", ")}`);
+    console.log(`diagnostic = ${st.diagnostic}`);
+  });
+provider
+  .command("select <runtime>")
+  .description("Persist the runtime selection (env vars still override).")
+  .option("--provider <name>", "provider backend for this runtime")
+  .option("--model <name>", "model id")
+  .action((runtime: string, opts: { provider?: string; model?: string }) => {
+    const parsed = RuntimeId.safeParse(runtime);
+    if (!parsed.success) {
+      console.error(`unknown runtime '${runtime}'. Allowed: ${RuntimeId.options.join(", ")}`);
+      process.exitCode = 2;
+      return;
+    }
+    const provErr = validateProvider(parsed.data, opts.provider);
+    if (provErr) {
+      console.error(provErr);
+      process.exitCode = 2;
+      return;
+    }
+    const file = persistSelection({
+      runtime: parsed.data,
+      provider: opts.provider,
+      model: opts.model ?? REGISTRY[parsed.data].defaultModel,
+    });
+    console.log(`selected runtime=${parsed.data}; wrote ${file}`);
+  });
+provider
+  .command("test")
+  .description("Contract/live test the selected runtime (no silent fallback).")
+  .action(async () => {
+    const cfg = resolveRuntimeConfig();
+    const r = await providerTest(cfg);
+    console.log(`runtime=${r.runtime} model=${r.model} kind=${r.kind} ok=${r.ok}`);
+    console.log(r.message);
+    process.exitCode = r.ok ? 0 : 1;
+  });
 
 const workflow = program
   .command("workflow")

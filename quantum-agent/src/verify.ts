@@ -21,6 +21,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "tool",
   "cache",
   "autoupdate",
+  "provider",
 ]);
 
 const NON_QUANTUM_OK = new Set([

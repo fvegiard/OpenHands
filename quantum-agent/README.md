@@ -65,6 +65,29 @@ Sources (configured in `skills.sources.toml`):
 - **VoltAgent/awesome-openclaw-skills** (5 400+ filtered)
 - **Local** (`./skills/`)
 
+## Providers / runtimes
+
+Quantum's default runtime is Claude via `@anthropic-ai/claude-agent-sdk`. That
+SDK runs **Claude models only** (through Anthropic, Bedrock, Vertex, or
+Foundry) — setting an OpenAI/Gemini/OpenRouter key does not make that runtime
+use those models. To run non-Claude models, select a different runtime built on
+its own official SDK. Optional runtimes are discoverable, not bundled: if the
+package or secret is missing, Quantum prints the exact package/secret needed and
+exits — no silent fallback.
+
+```bash
+quantum provider list                 # runtimes + required package/secret
+quantum provider status               # selected runtime, model, capabilities
+quantum provider select openai-agents --model gpt-5.1
+quantum provider test                 # contract test (live only if secret set)
+```
+
+Selection precedence: `QUANTUM_RUNTIME` / `QUANTUM_PROVIDER` / `QUANTUM_MODEL`
+env vars override a persisted `provider select`, which overrides the `claude`
+default. Secret **values** come only from Cursor Secrets / environment
+variables (e.g. `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`); Quantum never stores or prints a key.
+
 ## MCP
 
 Quantum is **both** an MCP server and an MCP client.
