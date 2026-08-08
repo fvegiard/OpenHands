@@ -237,9 +237,9 @@ _have() { command -v "$1" >/dev/null 2>&1; }
 
 # Which listener inspectors are usable here (deterministic order).
 port_inspector() {
-  # Test hook: force a specific inspector or 'none' to exercise fail-closed.
+  # Test hooks: force a specific inspector, 'none', or 'fake' (with OHC_FAKE_RESULT).
   case "${OHC_PORT_INSPECTOR:-}" in
-    none) echo "none"; return 0 ;;
+    none | fake) echo "$OHC_PORT_INSPECTOR"; return 0 ;;
     lsof | ss | fuser) echo "$OHC_PORT_INSPECTOR"; return 0 ;;
   esac
   if _have lsof; then echo lsof; return 0; fi
@@ -248,36 +248,78 @@ port_inspector() {
   echo "none"
 }
 
-# Echo the PID listening on $1. Exit 0 = inspected OK (empty => genuinely free);
-# Exit 3 = UNKNOWN (no supported inspector). Command-not-found/error is NEVER
-# treated as free (fail-closed).
-listener_pid() {
-  local port="$1"
-  case "$(port_inspector)" in
-    lsof) lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1 ;;
-    ss)
-      ss -ltnH 2>/dev/null | awk -v p="$port" '
-        { n = split($4, a, ":"); if (a[n] == p) { if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); exit } } }'
-      ;;
-    fuser) fuser "$port/tcp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | head -1 ;;
-    *) return 3 ;;
-  esac
-  return 0
-}
+# Each _inspect_* echoes EXACTLY one of:
+#   "free"             inspector ran and confirmed NO listener
+#   "pid <N>"          a listener exists and its PID is <N>
+#   "listener-no-pid"  a listener exists but its PID is not obtainable
+#   "error"            the inspector failed to execute/parse
+# An error/no-pid is NEVER reported as free (fail-closed).
 
-# Classify the listener on port $1: owned | foreign:<pid>:<comm> | free | unknown
-port_ownership() {
-  local port="$1" pid rc owner ours
-  pid="$(listener_pid "$port")"
+_inspect_lsof() {
+  local port="$1" pids rc
+  pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null)"
   rc=$?
-  if [ "$rc" -eq 3 ]; then
-    echo "unknown"
+  if [ -n "$pids" ]; then
+    echo "pid $(printf '%s' "$pids" | head -1)"
     return 0
   fi
-  [ -z "$pid" ] && {
+  # lsof exits 0 (match) or 1 (no match) normally; empty output with rc<=1 is a
+  # confirmed free port. Any other exit is an execution error.
+  if [ "$rc" -le 1 ]; then echo "free"; else echo "error"; fi
+}
+
+_inspect_ss() {
+  local port="$1" exists rc withpid pid
+  # Existence (process-agnostic) — reliable without privileges.
+  exists="$(ss -ltnH "sport = :$port" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "error"
+    return 0
+  fi
+  if [ -z "$exists" ]; then
     echo "free"
     return 0
-  }
+  fi
+  # A listener exists — now try the process-aware query for its PID.
+  withpid="$(ss -ltnpH "sport = :$port" 2>/dev/null)"
+  pid="$(printf '%s' "$withpid" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)"
+  if [ -n "$pid" ]; then echo "pid $pid"; else echo "listener-no-pid"; fi
+}
+
+_inspect_fuser() {
+  local port="$1" out rc pid
+  out="$(fuser "$port/tcp" 2>/dev/null)"
+  rc=$?
+  pid="$(printf '%s' "$out" | tr -s ' ' '\n' | grep -E '^[0-9]+$' | head -1)"
+  if [ -n "$pid" ]; then
+    echo "pid $pid"
+    return 0
+  fi
+  # fuser: rc 1 = no process holds the port (confirmed free); other rc = error.
+  if [ "$rc" -eq 1 ]; then echo "free"; else echo "error"; fi
+}
+
+_inspect_fake() { echo "${OHC_FAKE_RESULT:-error}"; }
+
+# Classify the listener on port $1:
+#   owned | foreign:<pid>:<comm> | free | unknown:<reason>
+port_ownership() {
+  local port="$1" res pid owner ours
+  case "$(port_inspector)" in
+    none) echo "unknown:no-inspector"; return 0 ;;
+    lsof) res="$(_inspect_lsof "$port")" ;;
+    ss) res="$(_inspect_ss "$port")" ;;
+    fuser) res="$(_inspect_fuser "$port")" ;;
+    fake) res="$(_inspect_fake "$port")" ;;
+    *) echo "unknown:no-inspector"; return 0 ;;
+  esac
+  case "$res" in
+    free) echo "free"; return 0 ;;
+    "pid "*) pid="${res#pid }" ;;
+    listener-no-pid) echo "unknown:listener-without-pid"; return 0 ;;
+    *) echo "unknown:inspector-error"; return 0 ;;
+  esac
   owner="$(pgid_of "$pid")"
   ours="$(verify_owned 2>/dev/null || true)"
   if [ -n "$ours" ] && [ "$owner" = "$ours" ]; then
@@ -339,8 +381,8 @@ cmd_start() {
   for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
     own="$(port_ownership "$port")"
     case "$own" in
-      unknown)
-        c_red "port $port: cannot inspect listeners — no supported inspector found (need one of: lsof, ss, fuser)"
+      unknown:*)
+        c_red "port $port: cannot verify listeners (${own#unknown:}) — need a working inspector (lsof, ss, or fuser)"
         unknown=1
         ;;
       foreign:*)

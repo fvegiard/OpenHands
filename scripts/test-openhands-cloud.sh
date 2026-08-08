@@ -79,6 +79,22 @@ else
   fail "start did not fail closed with no listener inspector (rc=$rc)"
 fi
 
+echo "== test: port_ownership classifies fake-inspector results fail-closed =="
+# The classifier must map inspector results deterministically and NEVER turn an
+# error/no-pid into 'free'. Only a confirmed 'free' may launch.
+ownfree="$(OHC_PORT_INSPECTOR=fake OHC_FAKE_RESULT='free' port_ownership 39001)"
+ownpid="$(OHC_PORT_INSPECTOR=fake OHC_FAKE_RESULT='pid 424242' port_ownership 39001)"
+ownnopid="$(OHC_PORT_INSPECTOR=fake OHC_FAKE_RESULT='listener-no-pid' port_ownership 39001)"
+ownerr="$(OHC_PORT_INSPECTOR=fake OHC_FAKE_RESULT='error' port_ownership 39001)"
+if [ "$ownfree" = "free" ] &&
+  [ "${ownpid%%:*}" = "foreign" ] &&
+  [ "$ownnopid" = "unknown:listener-without-pid" ] &&
+  [ "$ownerr" = "unknown:inspector-error" ]; then
+  pass "confirmed-free=free, occupied+pid=foreign, no-pid/err=unknown (never free)"
+else
+  fail "classifier not fail-closed (free='$ownfree' pid='$ownpid' nopid='$ownnopid' err='$ownerr')"
+fi
+
 echo "== test: stop terminates+reaps OUR group and preserves a foreign process =="
 # Owned group: a setsid sleep (its own group leader); record durable state.
 setsid bash -c 'sleep 60' &
