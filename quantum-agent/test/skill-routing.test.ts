@@ -2,9 +2,21 @@
 // `RunOptions.skill` was forwarded by the CLI but ignored by runAgent —
 // making `quantum run --skill foo` a silent no-op.
 
-import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAgent } from "../src/agent.ts";
 import { loadSkillByName } from "../src/skills/manager.ts";
+
+// Hermetic: default (claude mock) runtime regardless of ambient QUANTUM_* env
+// or any persisted `provider select` selection.
+beforeEach(() => {
+  vi.stubEnv("QUANTUM_HOME", mkdtempSync(`${tmpdir()}/qa-skill-`));
+  vi.stubEnv("QUANTUM_RUNTIME", "");
+  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "");
+  vi.stubEnv("ANTHROPIC_API_KEY", "");
+});
+afterEach(() => vi.unstubAllEnvs());
 
 describe("--skill routing", () => {
   it("loadSkillByName finds a shipped meta-skill", () => {

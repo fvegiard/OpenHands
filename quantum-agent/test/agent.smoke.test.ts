@@ -1,8 +1,14 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAgent } from "../src/agent.ts";
 
 describe("runAgent smoke (mock)", () => {
   beforeEach(() => {
+    // Hermetic: no ambient QUANTUM_HOME/RUNTIME or persisted selection leaks in,
+    // so the default claude mock runtime is exercised.
+    vi.stubEnv("QUANTUM_HOME", mkdtempSync(`${tmpdir()}/qa-smoke-`));
+    vi.stubEnv("QUANTUM_RUNTIME", "");
     vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
   });
