@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 """Deterministic transcript conformance validator (the CI gate).
 
-Fails (exit 1) on any drift or incomplete evidence:
+Fails (exit 1) on any drift, incomplete evidence, or unearned success:
   * schema violation (missing required fields / unknown type)
   * non-monotonic or gapped sequence IDs
   * broken hash chain (tamper)
   * mismatched contract/base/rubric hash (drift)
-  * unrecorded command result (no exit_code / stdout hash) — not replayable
+  * missing transcript for the required lane (absence is NOT a pass)
+  * stale head (run_start.head_sha != required head)
+  * unrecorded command result (no exit_code / stdout+stderr hash) — not replayable
   * raw secret value present (redaction failure)
-  * unsupported success claim (VERIFIED/PASS verdict without backing evidence)
+  * HIDDEN FAILED ITEM: a PASS/VERIFIED verdict while any test failed or a failure
+    event exists
+  * FABRICATED PASS: a PASS/VERIFIED verdict not backed by at least one real
+    (evidence="real") passing test — presence/echo evidence can never carry a
+    benchmark success
   * missing required event types / no final verdict
 
 VERIFIED integrity == complete + schema-valid + tamper-evident + redacted +
-replayable. A lane that is NOT VERIFIED cannot contribute code to integration.
+replayable + honestly scored. A lane that is NOT VERIFIED cannot contribute code.
 
 Usage:
   python3 validate_transcript.py --transcript <path.jsonl> \
       --contract-lock experiments/contract.lock.json \
-      --base-sha 1f43ce8112653f1f05e5b6bf0caf1534beb6114d
+      --base-sha 1f43ce8112653f1f05e5b6bf0caf1534beb6114d \
+      [--require-lane synthesis] [--require-head <sha>] [--require-pass]
 """
 
 from __future__ import annotations
@@ -37,6 +44,8 @@ from transcript_lib import (  # noqa: E402
     read_jsonl,
 )
 
+REPO = Path(__file__).resolve().parents[2]
+
 
 def _walk_strings(obj):
     if isinstance(obj, str):
@@ -49,12 +58,20 @@ def _walk_strings(obj):
             yield from _walk_strings(v)
 
 
-def validate(transcript: Path, lock: dict, base_sha: str) -> list[str]:
+def validate(
+    transcript: Path,
+    lock: dict,
+    base_sha: str,
+    require_head: str | None = None,
+    require_pass: bool = False,
+) -> list[str]:
     errors: list[str] = []
+    if not transcript.exists():
+        return [f'transcript missing: {transcript} (absence is NOT VERIFIED)']
     try:
         events = read_jsonl(transcript)
-    except Exception as e:
-        return [f'cannot parse transcript: {e}']
+    except Exception as exc:
+        return [f'cannot parse transcript: {exc}']
     if not events:
         return ['empty transcript']
 
@@ -96,11 +113,11 @@ def validate(transcript: Path, lock: dict, base_sha: str) -> list[str]:
     if events[-1]['type'] != 'verdict':
         errors.append('last event must be verdict')
     types = [e['type'] for e in events]
-    for needed in ('run_start', 'command', 'artifact', 'verdict'):
+    for needed in ('run_start', 'command', 'test', 'artifact', 'verdict'):
         if needed not in types:
             errors.append(f'missing required event type: {needed}')
 
-    # 4. drift: contract/base/rubric hashes
+    # 4. drift: contract/base/rubric hashes + head freshness
     rs = events[0] if events[0]['type'] == 'run_start' else {}
     if rs:
         if rs.get('base_sha') != base_sha:
@@ -110,6 +127,10 @@ def validate(transcript: Path, lock: dict, base_sha: str) -> list[str]:
         if rs.get('rubric_sha256') != lock.get('files', {}).get('harness/rubric.json'):
             errors.append(
                 'drift: rubric_sha256 != frozen rubric hash (changed benchmark criteria)'
+            )
+        if require_head is not None and rs.get('head_sha') != require_head:
+            errors.append(
+                f'stale head: run_start.head_sha {rs.get("head_sha")} != required {require_head}'
             )
 
     # 5. replayability: every command must record an exit code + output hashes
@@ -124,12 +145,38 @@ def validate(transcript: Path, lock: dict, base_sha: str) -> list[str]:
                     f'event#{idx + 1}: command without stdout/stderr hash (not replayable)'
                 )
 
-    # 6. unsupported success claim
+    # 6. honest scoring: no hidden failures, no fabricated / mislabeled success
+    tests = [e for e in events if e['type'] == 'test']
+    failures = [e for e in events if e['type'] == 'failure']
+    real_pass_seqs = {
+        e['seq']
+        for e in tests
+        if e.get('evidence') == 'real'
+        and int(e.get('passed', 0)) >= 1
+        and int(e.get('failed', 0)) == 0
+    }
     verdict = events[-1] if events[-1]['type'] == 'verdict' else None
     if verdict:
         if verdict.get('result') not in VERDICT_RESULTS:
             errors.append(f'verdict.result invalid: {verdict.get("result")}')
-        if verdict.get('result') in {'VERIFIED', 'PASS'}:
+        is_success = verdict.get('result') in {'VERIFIED', 'PASS'}
+        if require_pass and not is_success:
+            errors.append(
+                f'required PASS but verdict is {verdict.get("result")} (lane NOT VERIFIED)'
+            )
+        if is_success:
+            # (a) hidden failed item: any failed test or failure event forbids PASS
+            failed_tests = [t for t in tests if int(t.get('failed', 0)) > 0]
+            if failed_tests:
+                errors.append(
+                    f'hidden failed item: verdict PASS but {len(failed_tests)} test(s) failed '
+                    f'({", ".join(t.get("name", "?") for t in failed_tests)})'
+                )
+            if failures:
+                errors.append(
+                    f'verdict PASS but {len(failures)} failure event(s) recorded (hidden failure)'
+                )
+            # (b) fabricated / mislabeled PASS: must be backed by a REAL passing test
             backed = verdict.get('backed_by') or []
             if not backed:
                 errors.append(
@@ -139,16 +186,10 @@ def validate(transcript: Path, lock: dict, base_sha: str) -> list[str]:
             for b in backed:
                 if b not in seqs:
                     errors.append(f'verdict backed_by cites non-existent event seq {b}')
-            # at least one cited event must be a passing test or a zero-exit command
-            support = [e for e in events if e['seq'] in backed]
-            ok = any(
-                (e['type'] == 'test' and e.get('failed', 1) == 0)
-                or (e['type'] == 'command' and e.get('exit_code') == 0)
-                for e in support
-            )
-            if support and not ok:
+            if not (set(backed) & real_pass_seqs):
                 errors.append(
-                    'verdict success not supported by any passing test / zero-exit command'
+                    'fabricated PASS: verdict not backed by any real (evidence="real") '
+                    'passing test — presence/echo evidence cannot carry a benchmark success'
                 )
 
     return errors
@@ -156,22 +197,40 @@ def validate(transcript: Path, lock: dict, base_sha: str) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--transcript', required=True)
+    ap.add_argument('--transcript', default=None)
+    ap.add_argument('--require-lane', default=None)
+    ap.add_argument('--require-head', default=None)
+    ap.add_argument('--require-pass', action='store_true')
     ap.add_argument('--contract-lock', default='experiments/contract.lock.json')
     ap.add_argument('--base-sha', default='1f43ce8112653f1f05e5b6bf0caf1534beb6114d')
     args = ap.parse_args()
 
+    if args.require_lane:
+        path = REPO / 'experiments' / 'lanes' / args.require_lane / 'transcript.jsonl'
+    elif args.transcript:
+        path = Path(args.transcript)
+    else:
+        print('error: pass --transcript or --require-lane')
+        return 2
+
     lock = json.loads(Path(args.contract_lock).read_text())
-    errors = validate(Path(args.transcript), lock, args.base_sha)
+    errors = validate(
+        path,
+        lock,
+        args.base_sha,
+        require_head=args.require_head,
+        require_pass=args.require_pass,
+    )
     if errors:
         print(
-            f'transcript-conformance: NOT VERIFIED — {len(errors)} violation(s) in {args.transcript}'
+            f'transcript-conformance: NOT VERIFIED — {len(errors)} violation(s) in {path}'
         )
         for e in errors:
             print(f'  - {e}')
         return 1
     print(
-        f'transcript-conformance: VERIFIED (complete, schema-valid, tamper-evident, redacted, replayable): {args.transcript}'
+        f'transcript-conformance: VERIFIED (complete, schema-valid, tamper-evident, '
+        f'redacted, replayable, honestly scored): {path}'
     )
     return 0
 

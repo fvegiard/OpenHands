@@ -12,10 +12,10 @@
     "contract_ack": {"required": ["contract_bundle_sha256"]},
     "message": {"required": ["role", "text"], "note": "role in {user, agent, system}"},
     "tool_call": {"required": ["name", "args"], "note": "args must be redacted"},
-    "command": {"required": ["cmd", "cwd", "exit_code", "stdout_sha256", "stderr_sha256"], "optional": ["stdout_excerpt", "stderr_excerpt"]},
+    "command": {"required": ["cmd", "cwd", "exit_code", "stdout_sha256", "stderr_sha256"], "optional": ["stdout_excerpt", "stderr_excerpt", "evidence", "item"], "note": "evidence in {real}; a non-zero exit is allowed only for items whose desired behavior is failure (e.g. rejecting an invalid runtime)"},
     "changed_files": {"required": ["files"]},
     "commit": {"required": ["sha", "message"]},
-    "test": {"required": ["name", "passed", "failed", "skipped"]},
+    "test": {"required": ["name", "passed", "failed", "skipped"], "optional": ["evidence", "critical", "note"], "note": "evidence in {real, presence, live}; only evidence=real passing tests may back a PASS/VERIFIED verdict — presence/echo is contract evidence only"},
     "artifact": {"required": ["path", "sha256", "bytes"]},
     "failure": {"required": ["where", "detail"]},
     "retry": {"required": ["of", "attempt", "budget"]},
@@ -27,6 +27,8 @@
     "every command has an integer exit_code and stdout/stderr sha256 (replayable)",
     "no raw secret values anywhere (only [REDACTED]); env vars by NAME only",
     "run_start.base_sha == frozen base; contract_bundle_sha256 and rubric_sha256 == contract.lock.json",
-    "a VERIFIED/PASS verdict must cite backed_by event seqs that exist and (for tests) show no failures"
+    "the required lane transcript must exist and (under --require-head) match the current head — absence/stale head is NOT VERIFIED",
+    "a VERIFIED/PASS verdict must be backed by >=1 real (evidence=real) passing test and must not coexist with any failed test or failure event",
+    "presence/echo/mock checks are contract evidence only (evidence in {presence, live}) and can never carry a benchmark success"
   ]
 }

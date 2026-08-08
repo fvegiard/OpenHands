@@ -22,7 +22,7 @@ def render(events: list[dict]) -> str:
     if rs.get('type') == 'run_start':
         out += [
             f'- agent/model/runtime: `{rs.get("agent")}` / `{rs.get("model")}` / `{rs.get("runtime")}`',
-            f'- branch/base/head: `{rs.get("branch")}` / `{rs.get("base_sha")[:9]}` / `{rs.get("head_sha")[:9]}`',
+            f'- branch/base/head: `{rs.get("branch")}` / `{str(rs.get("base_sha"))[:9]}` / `{str(rs.get("head_sha"))[:9]}`',
             f'- contract bundle sha256: `{rs.get("contract_bundle_sha256")}`',
             f'- rubric sha256: `{rs.get("rubric_sha256")}`',
             '',
@@ -35,7 +35,8 @@ def render(events: list[dict]) -> str:
         elif t == 'message':
             d = f'**{e.get("role")}**: {str(e.get("text"))[:200]}'
         elif t == 'test':
-            d = f'{e.get("name")}: passed={e.get("passed")} failed={e.get("failed")} skipped={e.get("skipped")}'
+            ev = f' [{e.get("evidence")}]' if e.get('evidence') else ''
+            d = f'{e.get("name")}{ev}: passed={e.get("passed")} failed={e.get("failed")} skipped={e.get("skipped")}'
         elif t == 'artifact':
             d = f'`{e.get("path")}` sha256=`{str(e.get("sha256"))[:12]}` bytes={e.get("bytes")}'
         elif t == 'failure':

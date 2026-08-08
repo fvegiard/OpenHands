@@ -5,9 +5,18 @@ transcripts are **VERIFIED** by `experiments/harness/validate_transcript.py`
 (complete, schema-valid, tamper-evident, redacted, replayable) against the frozen
 `experiments/contract.lock.json` (bundle `fd50d17f927fa9e8a32ed24ed0bd78ecd74fdc132f8665656702143c73518473`).
 
-A lane with drift, missing events, unrecorded commands, changed benchmark
-criteria, or an unsupported success claim is **NOT VERIFIED** and contributes no
-code.
+A lane with drift, a missing/stale transcript, unrecorded commands, changed
+benchmark criteria, a hidden failed item, or a fabricated PASS is **NOT VERIFIED**
+and contributes no code. Only `evidence="real"` passing tests count toward a
+benchmark score; presence/echo/mock checks are contract evidence only and are
+reported `NOT_VERIFIED`. Superiority additionally requires **100% critical local
+acceptance plus a strictly higher identical runnable score** (`compare_lanes.py`);
+otherwise the synthesis decision is `NOT_VERIFIED`.
+
+Current cursor/synthesis lane: benchmark **9/9 real critical PASS**; presence-only
+items (`t08`,`t09`,`t10`,`t13`) and the live call (`t14`) are `NOT_VERIFIED` by
+design (need the running app / a provider secret). Superiority is `NOT_VERIFIED`
+until ≥2 lanes share the identical rubric + runnable set.
 
 ## How to read this file
 

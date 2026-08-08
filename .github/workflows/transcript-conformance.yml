@@ -1,24 +1,32 @@
 name: transcript-conformance
 
-# No-drift + transcript-integrity gate for the multi-agent experiment.
-# Fails on contract drift or any non-conformant lane transcript. A lane that is
-# NOT VERIFIED here cannot contribute code to integration.
+# No-drift + transcript-integrity + honest-scoring gate for the multi-agent
+# experiment. Fails on contract drift, a missing/stale lane transcript, a hidden
+# failed item, or a fabricated PASS. A lane that is NOT VERIFIED here cannot
+# contribute code to integration.
 on:
   push:
     branches: [main, agent/provider-neutral-autonomy, experiment/claude-agent, experiment/codex-agent, experiment/mavis-minimax-m3]
     paths:
       - "experiments/**"
+      - "scripts/**"
+      - "quantum-agent/**"
+      - ".agents/skills/**"
       - ".github/workflows/transcript-conformance.yml"
   pull_request:
     paths:
       - "experiments/**"
+      - "scripts/**"
+      - "quantum-agent/**"
+      - ".agents/skills/**"
       - ".github/workflows/transcript-conformance.yml"
 
 jobs:
-  conformance:
+  # Fast, python-only gate: contract lock, red fixtures, committed-lane integrity.
+  integrity:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Contract lock integrity (frozen bundle unchanged)
         run: |
@@ -38,14 +46,56 @@ jobs:
           print("contract lock OK:", bundle)
           PY
 
-      - name: Validate every lane transcript
+      - name: Red fixtures (validator rejects false confidence)
+        run: python3 experiments/harness/test_transcript_gate.py
+
+      - name: Skill format lint (real command)
+        run: python3 experiments/harness/skill_lint.py
+
+      - name: Require + validate committed lane transcripts (integrity, audit)
         run: |
           set -e
+          # The synthesis (cursor) lane MUST be present — absence is NOT a pass.
+          python3 experiments/harness/validate_transcript.py --require-lane synthesis
+          # Validate any other lane transcripts that exist for integrity/tamper.
           shopt -s nullglob
-          found=0
           for t in experiments/lanes/*/transcript.jsonl; do
-            found=1
+            [ "$t" = "experiments/lanes/synthesis/transcript.jsonl" ] && continue
             echo "== $t =="
             python3 experiments/harness/validate_transcript.py --transcript "$t"
           done
-          if [ "$found" = "0" ]; then echo "no lane transcripts present (nothing to validate)"; fi
+
+  # Real at-head gate: regenerate the cursor lane from REAL commands at the
+  # current HEAD, then require a PASS verdict bound to real passing evidence.
+  regen-and-validate-head:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+
+      - name: Setup Node (pinned LTS with node:sqlite)
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+          cache-dependency-path: quantum-agent/pnpm-lock.yaml
+
+      - name: Install quantum-agent deps (frozen)
+        working-directory: quantum-agent
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate cursor lane at HEAD (real commands) and validate at-head
+        run: |
+          set -e
+          HEAD_SHA="$(git rev-parse HEAD)"
+          python3 experiments/harness/gen_transcript.py \
+            --lane synthesis --agent cursor --model gpt-5-class --runtime cursor-cloud
+          python3 experiments/harness/validate_transcript.py \
+            --require-lane synthesis --require-head "$HEAD_SHA" --require-pass
+
+      - name: Superiority gate (NOT_VERIFIED unless a lane is provably superior)
+        run: python3 experiments/harness/compare_lanes.py

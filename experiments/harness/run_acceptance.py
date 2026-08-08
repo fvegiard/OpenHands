@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 """Deterministic acceptance/benchmark harness — identical across experiment lanes.
 
-Runs the shared rubric (rubric.json) against whatever the current lane actually
-implements and writes machine-readable results. It is:
+Runs the shared rubric (rubric.json, frozen in contract.lock.json) against what
+the current lane actually implements and writes machine-readable results.
 
-  * deterministic and non-destructive (no writes to tracked files, no app start);
-  * credential-safe (live-provider tasks are NOT_VERIFIED unless a secret exists;
-    secret VALUES are never printed);
-  * lane-agnostic (capability-detected: a task the lane has not implemented scores
-    MISSING rather than crashing).
+Hardening (no false confidence):
+  * Every SCORED item is bound to a REAL command: its argv, real exit code, and
+    stdout/stderr sha256 are recorded so evidence is replayable, not asserted.
+  * Presence/echo checks are CONTRACT EVIDENCE ONLY (evidence="presence"): they
+    are reported NOT_VERIFIED and NEVER counted as benchmark success. Real
+    provider selection, live self-heal recovery, real session resume, and true
+    fresh-context skill loading need the running app / a provider secret and are
+    therefore NOT_VERIFIED here rather than claimed.
+  * The benchmark score counts ONLY real items (passed_real / total_real).
+  * Exit code is NON-ZERO if any CRITICAL real item is not PASS (fail-closed);
+    the producer/CI turn that into a NOT_VERIFIED verdict.
+  * Credential-safe: secret VALUES are never printed; live items are NOT_VERIFIED
+    unless a secret is present.
 
-Status values: PASS (1), FAIL (0), MISSING (0, not implemented), NOT_VERIFIED
-(excluded from the ratio, needs a secret/live run).
+Status values: PASS, FAIL, MISSING (not implemented), NOT_VERIFIED (presence-only
+or needs a secret/live run — excluded from the benchmark ratio).
 
 Usage:
   python3 experiments/harness/run_acceptance.py --lane <name> \
-      [--out experiments/harness/results-<name>.json]
+      [--out experiments/lanes/<name>/results-<name>.json]
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -33,10 +44,39 @@ QA = REPO / 'quantum-agent'
 SKILLS = REPO / '.agents' / 'skills'
 LIVE_SECRETS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']
 
+# Evidence policy — IDENTICAL across all lanes (part of the shared harness).
+#   real:     a runnable command whose exit/output is scored (benchmark).
+#   presence: a structural/mock check — contract evidence only, NEVER benchmark
+#             success (needs the running app / a fresh agent context / a live
+#             session to be real; reported NOT_VERIFIED).
+#   live:     needs a provider secret; NOT_VERIFIED unless present.
+# critical:   must be PASS for local acceptance (100% required for superiority).
+EVIDENCE = {
+    't01-cli-help': ('real', True),
+    't02-provider-list': ('real', True),
+    't03-provider-status': ('real', True),
+    't04-provider-test-diagnostic': ('real', True),
+    't05-provider-switch': ('real', True),
+    't06-invalid-runtime-errors': ('real', True),
+    't07-skill-validate': ('real', True),
+    't08-skill-forward-1': ('presence', False),
+    't09-skill-forward-2': ('presence', False),
+    't10-self-heal-recovery': ('presence', False),
+    't11-verify-contract': ('real', True),
+    't12-doctor-report': ('real', True),
+    't13-resume': ('presence', False),
+    't14-live-provider-call': ('live', False),
+}
+
+
+def sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode('utf-8', 'replace')).hexdigest()
+
 
 def sh(
-    cmd: list[str], cwd: Path | None = None, env: dict | None = None, timeout: int = 120
+    cmd: list[str], cwd: Path | None = None, env: dict | None = None, timeout: int = 180
 ):
+    """Run a command; return (rc, stdout, stderr, ms). rc=127 on exec error."""
     t0 = time.time()
     try:
         p = subprocess.run(
@@ -48,238 +88,265 @@ def sh(
             env={**os.environ, **(env or {})},
         )
         ms = int((time.time() - t0) * 1000)
-        return p.returncode, (p.stdout or '') + (p.stderr or ''), ms
-    except Exception as e:
-        return 127, f'[harness-exec-error] {e}', int((time.time() - t0) * 1000)
+        return p.returncode, (p.stdout or ''), (p.stderr or ''), ms
+    except Exception as e:  # noqa: BLE001 — record as an exec failure, never crash
+        return 127, '', f'[harness-exec-error] {e}', int((time.time() - t0) * 1000)
 
 
-def quantum(args: list[str], env: dict | None = None, timeout: int = 120):
-    """Invoke the lane's quantum CLI if present."""
-    if not (QA / 'package.json').exists():
-        return None
-    return sh(['corepack', 'pnpm', 'quantum', *args], cwd=QA, env=env, timeout=timeout)
+def quantum_argv(sub: list[str]) -> list[str]:
+    # Prefer a pnpm already on PATH (CI installs it); fall back to corepack.
+    base = ['pnpm'] if shutil.which('pnpm') else ['corepack', 'pnpm']
+    return [*base, 'quantum', *sub]
 
 
 def has_quantum() -> bool:
     return (QA / 'package.json').exists()
 
 
-# --------------------------------------------------------------------- probes
-# Each probe returns (status, retries, note). latency is measured by the caller.
+class Result:
+    """A single scored item bound to a real command artifact (when real)."""
+
+    def __init__(self, tid: str):
+        ev, crit = EVIDENCE.get(tid, ('real', True))
+        self.id = tid
+        self.evidence = ev
+        self.critical = crit
+        self.status = 'MISSING'
+        self.retries = 0
+        self.note = ''
+        self.cmd: str | None = None
+        self.cwd: str | None = None
+        self.exit_code: int | None = None
+        self.stdout_sha256: str | None = None
+        self.stderr_sha256: str | None = None
+        self.stdout_excerpt: str | None = None
+        self.latency_ms = 0
+
+    def bind(self, argv: list[str], cwd: Path, rc: int, out: str, err: str, ms: int):
+        self.cmd = ' '.join(argv)
+        self.cwd = str(cwd.relative_to(REPO)) if cwd != REPO else '.'
+        self.exit_code = rc
+        self.stdout_sha256 = sha256_hex(out)
+        self.stderr_sha256 = sha256_hex(err)
+        self.stdout_excerpt = (out or err)[-600:]
+        self.latency_ms = ms
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'evidence': self.evidence,
+            'critical': self.critical,
+            'status': self.status,
+            'latency_ms': self.latency_ms,
+            'retries': self.retries,
+            'note': self.note,
+            'cmd': self.cmd,
+            'cwd': self.cwd,
+            'exit_code': self.exit_code,
+            'stdout_sha256': self.stdout_sha256,
+            'stderr_sha256': self.stderr_sha256,
+            'stdout_excerpt': self.stdout_excerpt,
+        }
 
 
-def p_cli_help():
-    r = quantum(['--help'])
-    if r is None:
-        alt = REPO / 'scripts' / 'openhands-cloud'
-        if alt.exists():
-            rc, out, _ = sh(['bash', str(alt), 'help'])
-            return (
-                ('PASS' if rc == 0 and 'openhands-cloud' in out else 'FAIL'),
-                0,
-                'openhands-cloud help',
-            )
-        return 'MISSING', 0, 'no agent CLI'
-    rc, out, _ = r
-    return (
-        ('PASS' if rc == 0 and 'provider' in out or 'doctor' in out else 'FAIL'),
-        0,
-        'quantum --help',
+def real_probe(
+    tid: str,
+    argv: list[str],
+    cwd: Path,
+    ok: 're.Pattern[str] | Callable[[str], bool]',
+    *,
+    expect_nonzero: bool = False,
+    env: dict | None = None,
+    timeout: int = 180,
+) -> Result:
+    """Run a real command and score it PASS iff exit expectation + output match.
+
+    The RAW exit code and stdout/stderr hashes are always recorded (replayable).
+    `expect_nonzero` marks items where a non-zero exit is the *desired* behavior
+    (e.g. rejecting an invalid runtime); scoring keys off this expectation, not a
+    blanket exit==0 rule.
+    """
+    r = Result(tid)
+    rc, out, err, ms = sh(argv, cwd=cwd, env=env, timeout=timeout)
+    r.bind(argv, cwd, rc, out, err, ms)
+    combined = out + err
+    exit_ok = (rc != 0) if expect_nonzero else (rc == 0)
+    if isinstance(ok, re.Pattern):
+        content_ok = bool(ok.search(combined))
+    else:
+        content_ok = bool(ok(combined))
+    r.status = 'PASS' if (exit_ok and content_ok) else 'FAIL'
+    r.note = f'exit={rc} expect_nonzero={expect_nonzero} content_ok={content_ok}'
+    return r
+
+
+def _missing(tid: str, note: str) -> Result:
+    r = Result(tid)
+    r.status = 'MISSING'
+    r.note = note
+    return r
+
+
+def presence_probe(tid: str, present: bool, note: str, retries: int = 0) -> Result:
+    """A structural/mock check: contract evidence only, reported NOT_VERIFIED.
+
+    `present` records whether the structural artifact exists (contract evidence);
+    either way the benchmark status is NOT_VERIFIED — a presence check is never
+    counted as real success.
+    """
+    r = Result(tid)
+    r.retries = retries
+    r.status = 'NOT_VERIFIED'
+    r.note = (
+        f'presence={present}; {note} (contract-only; real run needs app/live session)'
     )
+    return r
 
 
-def _provider(args, env=None):
-    return quantum(['provider', *args], env=env)
+# ---------------------------------------------------------------- real probes
 
 
-def p_provider_list():
-    r = _provider(['list'])
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    ok = rc == 0 and ('claude' in out) and ('secret' in out.lower() or 'OPENAI' in out)
-    return (
-        ('PASS' if ok else ('MISSING' if 'unknown command' in out else 'FAIL')),
-        0,
-        'runtimes+pkg/secret listed',
-    )
+def probe_real(tid: str) -> Result:  # noqa: C901 — explicit per-item mapping
+    q = has_quantum()
+    if tid == 't01-cli-help':
+        if not q:
+            alt = REPO / 'scripts' / 'openhands-cloud'
+            if alt.exists():
+                return real_probe(
+                    tid,
+                    ['bash', str(alt), 'help'],
+                    REPO,
+                    re.compile(r'openhands-cloud', re.I),
+                )
+            return _missing(tid, 'no agent CLI')
+        return real_probe(
+            tid, quantum_argv(['--help']), QA, re.compile(r'provider|doctor', re.I)
+        )
+    if tid == 't02-provider-list':
+        if not q:
+            return _missing(tid, 'no quantum CLI')
+        return real_probe(
+            tid,
+            quantum_argv(['provider', 'list']),
+            QA,
+            lambda o: ('claude' in o.lower())
+            and ('secret' in o.lower() or 'OPENAI' in o),
+        )
+    if tid == 't03-provider-status':
+        if not q:
+            return _missing(tid, 'no quantum CLI')
+        return real_probe(
+            tid,
+            quantum_argv(['provider', 'status']),
+            QA,
+            lambda o: 'runtime' in o.lower() and 'model' in o.lower(),
+        )
+    if tid == 't04-provider-test-diagnostic':
+        if not q:
+            return _missing(tid, 'no quantum CLI')
+        return real_probe(
+            tid,
+            quantum_argv(['provider', 'test']),
+            QA,
+            lambda o: any(w in o.lower() for w in ('contract', 'ready', 'diagnostic'))
+            or any(s in o for s in LIVE_SECRETS),
+        )
+    if tid == 't05-provider-switch':
+        if not q:
+            return _missing(tid, 'no quantum CLI')
+        return real_probe(
+            tid,
+            quantum_argv(['provider', 'status']),
+            QA,
+            re.compile(r'codex', re.I),
+            env={'QUANTUM_RUNTIME': 'codex', 'QUANTUM_HOME': '/tmp/exp-harness-qh'},
+        )
+    if tid == 't06-invalid-runtime-errors':
+        if not q:
+            return _missing(tid, 'no quantum CLI')
+        return real_probe(
+            tid,
+            quantum_argv(['provider', 'status']),
+            QA,
+            re.compile(r'invalid|allowed|runtime', re.I),
+            expect_nonzero=True,
+            env={
+                'QUANTUM_RUNTIME': 'gemini-bogus',
+                'QUANTUM_HOME': '/tmp/exp-harness-qh2',
+            },
+        )
+    if tid == 't07-skill-validate':
+        return real_probe(
+            tid,
+            ['python3', 'experiments/harness/skill_lint.py'],
+            REPO,
+            re.compile(r'OK \(\d+ skills valid\)'),
+        )
+    if tid == 't11-verify-contract':
+        if not q:
+            return _missing(tid, 'no quantum CLI')
+        return real_probe(tid, quantum_argv(['verify']), QA, re.compile(r'unknown=0'))
+    if tid == 't12-doctor-report':
+        script = REPO / 'scripts' / 'test-openhands-cloud.sh'
+        if not script.exists():
+            return _missing(tid, 'no doctor E2E')
+        return real_probe(tid, ['bash', str(script)], REPO, re.compile(r'ALL PASS'))
+    return _missing(tid, 'no real probe')
 
 
-def p_provider_status():
-    r = _provider(['status'])
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    return (
-        (
-            'PASS'
-            if rc == 0 and 'runtime' in out.lower() and 'model' in out.lower()
-            else ('MISSING' if 'unknown command' in out else 'FAIL')
-        ),
-        0,
-        'status shows runtime/model',
-    )
+def probe_presence(tid: str) -> Result:
+    if tid in ('t08-skill-forward-1', 't09-skill-forward-2'):
+        name = 'self-heal' if tid.endswith('1') else 'skill-new'
+        found = any(
+            (root / name / 'SKILL.md').exists() for root in (SKILLS, QA / 'skills-core')
+        )
+        return presence_probe(
+            tid, found, f'{name} discoverable by file (not a fresh agent context)'
+        )
+    if tid == 't10-self-heal-recovery':
+        doctor = REPO / 'scripts' / 'openhands-cloud'
+        found = doctor.exists() and 'REPAIRED' in doctor.read_text(encoding='utf-8')
+        return presence_probe(
+            tid,
+            found,
+            'bounded repair path present (not a live injected-failure recovery)',
+            retries=1,
+        )
+    if tid == 't13-resume':
+        found = has_quantum()
+        return presence_probe(
+            tid,
+            found,
+            'resume flag handled on mock transport (not a real session resume)',
+        )
+    return presence_probe(tid, False, 'no presence probe')
 
 
-def p_provider_test():
-    r = _provider(['test'])
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    # A precise diagnostic (contract or live) is required; no silent fallback.
-    ok = (
-        'contract' in out.lower()
-        or 'ready' in out.lower()
-        or 'diagnostic' in out.lower()
-        or any(s in out for s in LIVE_SECRETS)
-    )
-    return (
-        ('PASS' if ok else ('MISSING' if 'unknown command' in out else 'FAIL')),
-        0,
-        'precise diagnostic',
-    )
-
-
-def p_provider_switch():
-    base = _provider(['status'])
-    if base is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    r = _provider(
-        ['status'],
-        env={'QUANTUM_RUNTIME': 'codex', 'QUANTUM_HOME': '/tmp/exp-harness-qh'},
-    )
-    rc, out, _ = r
-    return (
-        (
-            'PASS'
-            if rc == 0 and 'codex' in out
-            else ('MISSING' if 'unknown command' in out else 'FAIL')
-        ),
-        0,
-        'env switch -> codex',
-    )
-
-
-def p_invalid_runtime():
-    r = _provider(
-        ['status'],
-        env={'QUANTUM_RUNTIME': 'gemini-bogus', 'QUANTUM_HOME': '/tmp/exp-harness-qh2'},
-    )
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    if 'unknown command' in out or 'unknown option' in out:
-        return 'MISSING', 0, 'provider command not implemented'
-    # Implemented: must reject with a precise error, not silently fall back.
-    ok = (
-        'invalid' in out.lower()
-        or 'allowed' in out.lower()
-        or (rc != 0 and 'runtime' in out.lower())
-    )
-    return ('PASS' if ok else 'FAIL'), 0, 'invalid id -> precise error'
-
-
-def _validate_skill(md: Path) -> bool:
-    text = md.read_text(encoding='utf-8')
-    m = re.match(r'^---\n(.*?)\n---\n', text, re.S)
-    if not m:
-        return False
-    fm = m.group(1)
-    name = re.search(r'^name:\s*(.+)$', fm, re.M)
-    desc = re.search(r'^description:\s*(.+)$', fm, re.M)
-    if not name or not desc:
-        return False
-    return bool(re.fullmatch(r'[a-z0-9]+(-[a-z0-9]+)*', name.group(1).strip()))
-
-
-def p_skill_validate():
-    if not SKILLS.is_dir():
-        return 'MISSING', 0, 'no .agents/skills'
-    mds = list(SKILLS.glob('*/SKILL.md'))
-    if not mds:
-        return 'MISSING', 0, 'no skills'
-    bad = [str(m.relative_to(REPO)) for m in mds if not _validate_skill(m)]
-    return ('PASS' if not bad else 'FAIL'), 0, f'{len(mds)} skills; bad={bad}'
-
-
-def p_skill_forward(name: str):
-    # Fresh-context discoverability: the skill file resolves by name and loads.
-    for root in [SKILLS, QA / 'skills-core']:
-        cand = root / name / 'SKILL.md'
-        if cand.exists() and _validate_skill(cand):
-            return 'PASS', 0, f'{name} discoverable at {cand.relative_to(REPO)}'
-    return 'MISSING', 0, f'{name} not found'
-
-
-def p_self_heal():
-    # Bounded self-heal capability present (doctor repair+rerun or self-heal skill).
-    doctor = REPO / 'scripts' / 'openhands-cloud'
-    if doctor.exists() and 'REPAIRED' in doctor.read_text(encoding='utf-8'):
-        return 'PASS', 1, 'doctor bounded repair+rerun (1 retry)'
-    if (SKILLS / 'self-heal' / 'SKILL.md').exists() or (
-        QA / 'skills-core' / 'self-heal' / 'SKILL.md'
-    ).exists():
-        return 'PASS', 1, 'self-heal skill present'
-    return 'MISSING', 0, 'no bounded self-heal'
-
-
-def p_verify_contract():
-    r = quantum(['verify'])
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    return (
-        ('PASS' if rc == 0 and 'unknown=0' in out else 'FAIL'),
-        0,
-        'README contract verify',
-    )
-
-
-def p_doctor_report():
-    doctor = REPO / 'scripts' / 'openhands-cloud'
-    if not doctor.exists():
-        return 'MISSING', 0, 'no doctor'
-    txt = doctor.read_text(encoding='utf-8')
-    ok = ('OHC_REPORT' in txt or 'generated_at' in txt) and 'doctor' in txt
-    return ('PASS' if ok else 'FAIL'), 0, 'machine-readable report supported'
-
-
-def p_resume():
-    # Deterministic resume-id handling: quantum chat/run accept --resume.
-    r = quantum(['chat', '--resume', 'last'], timeout=60)
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    return ('PASS' if rc == 0 else 'FAIL'), 0, 'resume id handled (mock transport)'
-
-
-def p_live_provider():
+def probe_live(tid: str) -> Result:
     have = [s for s in LIVE_SECRETS if os.environ.get(s)]
     if not have:
-        return 'NOT_VERIFIED', 0, f'needs one of: {", ".join(LIVE_SECRETS)}'
-    r = quantum(['run', 'reply with the single word: pong'], timeout=120)
-    if r is None:
-        return 'MISSING', 0, 'no quantum CLI'
-    rc, out, _ = r
-    return ('PASS' if rc == 0 else 'FAIL'), 0, 'live billable call'
+        r = Result(tid)
+        r.status = 'NOT_VERIFIED'
+        r.note = f'needs one of: {", ".join(LIVE_SECRETS)} (no billable run)'
+        return r
+    if not has_quantum():
+        return _missing(tid, 'no quantum CLI')
+    return real_probe(
+        tid,
+        quantum_argv(['run', 'reply with the single word: pong']),
+        QA,
+        re.compile(r'pong', re.I),
+        timeout=180,
+    )
 
 
-PROBES = {
-    't01-cli-help': p_cli_help,
-    't02-provider-list': p_provider_list,
-    't03-provider-status': p_provider_status,
-    't04-provider-test-diagnostic': p_provider_test,
-    't05-provider-switch': p_provider_switch,
-    't06-invalid-runtime-errors': p_invalid_runtime,
-    't07-skill-validate': p_skill_validate,
-    't08-skill-forward-1': lambda: p_skill_forward('self-heal'),
-    't09-skill-forward-2': lambda: p_skill_forward('skill-new'),
-    't10-self-heal-recovery': p_self_heal,
-    't11-verify-contract': p_verify_contract,
-    't12-doctor-report': p_doctor_report,
-    't13-resume': p_resume,
-    't14-live-provider-call': p_live_provider,
-}
+def score(tid: str) -> Result:
+    ev = EVIDENCE.get(tid, ('real', True))[0]
+    if ev == 'real':
+        return probe_real(tid)
+    if ev == 'presence':
+        return probe_presence(tid)
+    return probe_live(tid)
 
 
 def main() -> int:
@@ -289,38 +356,32 @@ def main() -> int:
     args = ap.parse_args()
 
     rubric = json.loads((Path(__file__).parent / 'rubric.json').read_text())
-    results = []
-    for task in rubric['tasks']:
-        tid = task['id']
-        probe = PROBES.get(tid)
-        t0 = time.time()
-        if probe is None:
-            status, retries, note = 'MISSING', 0, 'no probe'
-        else:
-            status, retries, note = probe()
-        ms = int((time.time() - t0) * 1000)
-        results.append(
-            {
-                'id': tid,
-                'category': task['category'],
-                'status': status,
-                'latency_ms': ms,
-                'retries': retries,
-                'note': note,
-            }
-        )
+    results = [score(t['id']).to_dict() for t in rubric['tasks']]
+    by_id = {r['id']: r for r in results}
+    for t in rubric['tasks']:
+        by_id[t['id']]['category'] = t['category']
 
-    scored = [r for r in results if r['status'] != 'NOT_VERIFIED']
-    passed = sum(1 for r in scored if r['status'] == 'PASS')
+    real = [r for r in results if r['evidence'] == 'real']
+    real_pass = [r for r in real if r['status'] == 'PASS']
+    critical = [r for r in results if r['critical']]
+    critical_pass = [r for r in critical if r['status'] == 'PASS']
+    presence = [r['id'] for r in results if r['evidence'] == 'presence']
+    not_verified = [r['id'] for r in results if r['status'] == 'NOT_VERIFIED']
+    critical_ok = len(critical_pass) == len(critical)
+
     summary = {
         'lane': args.lane,
         'rubric_version': rubric['rubric_version'],
         'head_sha': sh(['git', 'rev-parse', 'HEAD'])[1].strip(),
         'generated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'scored_tasks': len(scored),
-        'passed': passed,
-        'score_ratio': round(passed / len(scored), 3) if scored else 0.0,
-        'not_verified': [r['id'] for r in results if r['status'] == 'NOT_VERIFIED'],
+        'benchmark_total': len(real),
+        'benchmark_pass': len(real_pass),
+        'score_ratio': round(len(real_pass) / len(real), 3) if real else 0.0,
+        'critical_total': len(critical),
+        'critical_pass': len(critical_pass),
+        'critical_ok': critical_ok,
+        'presence_contract_only': presence,
+        'not_verified': not_verified,
         'total_latency_ms': sum(r['latency_ms'] for r in results),
         'total_retries': sum(r['retries'] for r in results),
         'cost_tokens': 'NOT_VERIFIED (no provider secret / no billable run)',
@@ -328,10 +389,19 @@ def main() -> int:
     out = {'summary': summary, 'results': results}
     print(json.dumps(summary, indent=2))
     for r in results:
-        print(f'  {r["status"]:12} {r["id"]:30} {r["latency_ms"]:6}ms  {r["note"]}')
+        mark = '*' if r['critical'] else ' '
+        print(
+            f'  {r["status"]:12}{mark} {r["id"]:30} {r["evidence"]:8} {r["latency_ms"]:6}ms  {r["note"]}'
+        )
     if args.out:
         Path(args.out).write_text(json.dumps(out, indent=2) + '\n')
         print(f'\nwrote {args.out}')
+
+    # Fail-closed: a critical real item that is not PASS makes the harness fail.
+    if not critical_ok:
+        failed = [r['id'] for r in critical if r['status'] != 'PASS']
+        print(f'\nCRITICAL NOT PASS: {failed} -> acceptance FAILED (fail-closed)')
+        return 1
     return 0
 
 
