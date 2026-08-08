@@ -53,9 +53,7 @@ jobs:
       - name: Verify README contract
         run: ./node_modules/.bin/tsx src/cli.ts verify
 
-  # Full compatibility lane: Node 26. Runs the identical suite but does not gate
-  # the merge (Node 26 is not the supported default). Do not claim Node 26
-  # support unless this lane is green.
+  # Full compatibility lane: Node 26 on Linux. Identical suite; non-gating.
   green-node26-compat:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -70,7 +68,31 @@ jobs:
           cache: pnpm
           cache-dependency-path: quantum-agent/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: ./node_modules/.bin/biome check .
-      - run: ./node_modules/.bin/tsc -p tsconfig.json --noEmit
-      - run: ./node_modules/.bin/vitest run
-      - run: ./node_modules/.bin/tsx src/cli.ts verify
+      - run: pnpm exec biome check .
+      - run: pnpm exec tsc -p tsconfig.json --noEmit
+      - run: pnpm exec vitest run
+      - run: pnpm exec tsx src/cli.ts verify
+
+  # Explicit Windows + Node 26 compatibility lane — the exact environment the
+  # operator reported failures in (Windows 11 / Node 26). Non-gating (Node 26 is
+  # not the supported default), but it validates the cross-platform path fixes
+  # (permissions/sources) and the git-clone no-prompt fix. biome runs in check
+  # mode only (never --write) so CI is non-mutating.
+  green-windows-node26-compat:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: pnpm
+          cache-dependency-path: quantum-agent/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec biome check .
+      - run: pnpm exec tsc -p tsconfig.json --noEmit
+      - run: pnpm exec vitest run
+      - run: pnpm exec tsx src/cli.ts verify
