@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # openhands-cloud — one discoverable command interface for this Cursor cloud
-# workspace. It composes the *existing* repo commands (make, poetry, curl,
-# quantum) into a small, well-behaved surface: setup, start, status, health,
-# verify, doctor, skill-new, skill-validate.
+# workspace, composing the existing repo commands (make, poetry, pnpm, curl).
 #
-# Design rules honored here:
+# Design guarantees:
 #   * every subcommand has help;
-#   * retries are bounded (never an infinite loop);
-#   * output is human-readable AND a machine-readable JSON artifact (doctor);
-#   * failures are explicit with a non-zero exit code and a precise reason;
-#   * secret *values* are never printed — only secret *names*.
+#   * checks are NON-MUTATING (biome check / verify — never --write);
+#   * pnpm and poetry are resolved deterministically from PATH (no hardcoded
+#     corepack; Node installs without Corepack are supported);
+#   * `start` tracks its OWN process group in a PID/state file and only ever
+#     stops processes it owns — foreign processes on the app ports are reported,
+#     never killed;
+#   * `doctor` emits a machine-readable report via a real JSON serializer
+#     (python3) with contract/base/head + per-check command/exit + hashes;
+#   * secret NAMES only are reported, never values.
 #
-# It is intentionally dependency-light (bash + curl + python3 + git) so it runs
-# on a fresh Cursor cloud VM before any heavy install.
+# Sourceable for tests: set OHC_LIB_ONLY=1 to load the functions without
+# executing main.
 
 set -uo pipefail
 
@@ -22,14 +25,89 @@ FRONTEND_PORT="${FRONTEND_PORT:-12000}"
 BACKEND="http://127.0.0.1:${BACKEND_PORT}"
 FRONTEND="http://127.0.0.1:${FRONTEND_PORT}"
 REPORT="${OHC_REPORT:-/tmp/openhands-cloud-doctor.json}"
-POETRY="${POETRY:-$HOME/.local/bin/poetry}"
 LOG="${OHC_LOG:-/tmp/openhands-cloud.log}"
+RUNTIME_DIR="${OHC_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/tmp}/openhands-cloud}"
+PIDFILE="$RUNTIME_DIR/app.pgid"
+FROZEN_BASE_SHA="1f43ce8112653f1f05e5b6bf0caf1534beb6114d"
+
+# Every provider secret NAME we recognize (values are NEVER read or printed).
+SECRET_NAMES=(
+  CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY
+  OPENAI_API_KEY CODEX_API_KEY OPENAI_BASE_URL
+  GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_APPLICATION_CREDENTIALS
+  OPENROUTER_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY MOONSHOT_API_KEY
+  AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_BEARER_TOKEN_BEDROCK
+  AZURE_API_KEY VERTEXAI_PROJECT
+  LLM_API_KEY
+)
 
 c_green() { printf '\033[32m%s\033[0m\n' "$1"; }
-c_red()   { printf '\033[31m%s\033[0m\n' "$1"; }
-log()     { printf '[openhands-cloud] %s\n' "$*" >&2; }
+c_red() { printf '\033[31m%s\033[0m\n' "$1"; }
+log() { printf '[openhands-cloud] %s\n' "$*" >&2; }
 
 http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null; }
+
+# ---------------------------------------------------------- tool resolution
+# Resolve pnpm deterministically: prefer a PATH pnpm (works on Node installs
+# without Corepack), else the repo-pinned version via npx, else corepack if it
+# exists. Never assume corepack.
+_PNPM=()
+resolve_pnpm() {
+  if [ ${#_PNPM[@]} -gt 0 ]; then return 0; fi
+  if command -v pnpm >/dev/null 2>&1; then
+    _PNPM=(pnpm)
+    return 0
+  fi
+  local pinned=""
+  if command -v node >/dev/null 2>&1; then
+    pinned="$(node -e "const p=require('$REPO_ROOT/quantum-agent/package.json').packageManager||'';process.stdout.write(p.replace(/^pnpm@/,''))" 2>/dev/null || true)"
+  fi
+  if [ -n "$pinned" ] && command -v npx >/dev/null 2>&1; then
+    _PNPM=(npx --yes "pnpm@$pinned")
+    return 0
+  fi
+  if command -v corepack >/dev/null 2>&1; then
+    _PNPM=(corepack pnpm)
+    return 0
+  fi
+  return 1
+}
+
+qa_pnpm() {
+  resolve_pnpm || {
+    echo "pnpm not resolvable (install pnpm or Node with npx)"
+    return 127
+  }
+  (cd "$REPO_ROOT/quantum-agent" && "${_PNPM[@]}" "$@")
+}
+
+# Resolve poetry: prefer a workspace-native / PATH poetry, else the pipx
+# location, else uv-run poetry if available.
+_POETRY=()
+resolve_poetry() {
+  if [ ${#_POETRY[@]} -gt 0 ]; then return 0; fi
+  if command -v poetry >/dev/null 2>&1; then
+    _POETRY=("$(command -v poetry)")
+    return 0
+  fi
+  if [ -x "$HOME/.local/bin/poetry" ]; then
+    _POETRY=("$HOME/.local/bin/poetry")
+    return 0
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    _POETRY=(uv run poetry)
+    return 0
+  fi
+  return 1
+}
+
+qa_poetry() {
+  resolve_poetry || {
+    echo "poetry not resolvable"
+    return 127
+  }
+  (cd "$REPO_ROOT" && "${_POETRY[@]}" "$@")
+}
 
 usage() {
   cat <<'EOF'
@@ -40,94 +118,189 @@ USAGE:
 
 COMMANDS:
   setup             Install backend (poetry) + frontend (npm ci) dependencies (idempotent).
-  start             Start backend + frontend (RUNTIME=local) and wait for health.
+  start             Start backend + frontend (RUNTIME=local) in their own process group;
+                    refuses to touch foreign processes on the app ports.
+  stop              Stop only the processes this tool started (by tracked PGID).
   status            Show ports, git branch, and running services.
   health            Check backend + frontend HTTP health. Exit non-zero on failure.
-  verify            Run quantum README-contract verify + skill validation.
-  doctor            Full diagnosis (install/start/build/secrets/network/migration013/
-                    local-sandbox/frontend/backend) with bounded repair+rerun.
-                    Writes a machine-readable report to $OHC_REPORT.
+  verify            Run quantum README-contract verify (non-mutating).
+  doctor            Full diagnosis with bounded repair+rerun; writes a JSON report to $OHC_REPORT.
   skill-new <desc>  Draft a new skill from a description (delegates to quantum skill new).
-  skill-validate <path>   Validate a SKILL.md's frontmatter + run its scripts if present.
+  skill-validate <path>   Validate a SKILL.md frontmatter + lowercase-hyphenated name (format only; no script execution).
   help              Show this help.
 
 ENV:
-  BACKEND_PORT (default 3000), FRONTEND_PORT (default 12000),
-  OHC_REPORT (doctor json path), OHC_LOG (log path).
+  BACKEND_PORT (3000), FRONTEND_PORT (12000), OHC_REPORT, OHC_LOG,
+  OHC_RUNTIME_DIR (PID/state dir, default $XDG_RUNTIME_DIR/openhands-cloud).
 EOF
+}
+
+# ------------------------------------------------------------ process helpers
+# The PGID of a running process (empty if it is gone).
+pgid_of() { ps -o pgid= -p "$1" 2>/dev/null | tr -d ' '; }
+
+# Our owned PGID from the state file, if the leader is still alive.
+owned_pgid() {
+  [ -f "$PIDFILE" ] || return 1
+  local pgid
+  pgid="$(tr -d ' \n' <"$PIDFILE")"
+  [ -n "$pgid" ] || return 1
+  echo "$pgid"
+}
+
+# Is the process listening on $1 owned by us? echoes: owned|foreign|free
+port_ownership() {
+  local port="$1" pid owner ours
+  pid="$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  [ -z "$pid" ] && {
+    echo "free"
+    return 0
+  }
+  owner="$(pgid_of "$pid")"
+  ours="$(owned_pgid || true)"
+  if [ -n "$ours" ] && [ "$owner" = "$ours" ]; then
+    echo "owned"
+  else
+    echo "foreign:$pid:$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
+  fi
 }
 
 # ------------------------------------------------------------------ subcommands
 
 cmd_setup() {
   log "backend deps (poetry install --with dev,test,runtime)"
-  ( cd "$REPO_ROOT" && "$POETRY" install --with dev,test,runtime ) || return 1
+  qa_poetry install --with dev,test,runtime || return 1
   log "frontend deps (npm ci)"
-  ( cd "$REPO_ROOT" && npm --prefix frontend ci ) || return 1
+  (cd "$REPO_ROOT" && npm --prefix frontend ci) || return 1
   c_green "setup: OK"
+}
+
+cmd_stop() {
+  local pgid
+  pgid="$(owned_pgid || true)"
+  if [ -z "$pgid" ]; then
+    log "stop: no tracked process group"
+    rm -f "$PIDFILE"
+    return 0
+  fi
+  log "stop: terminating owned process group $pgid"
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+  # Bounded wait for graceful exit, then force.
+  local i
+  for i in $(seq 1 10); do
+    kill -0 -- "-$pgid" 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 -- "-$pgid" 2>/dev/null; then
+    log "stop: escalating to SIGKILL for group $pgid"
+    kill -KILL -- "-$pgid" 2>/dev/null || true
+  fi
+  rm -f "$PIDFILE"
+  c_green "stop: OK"
 }
 
 cmd_start() {
   export INSTALL_DOCKER=0 RUNTIME=local
   unset SESSION_API_KEY 2>/dev/null || true
-  # Free the ports first so restart is idempotent (bounded, by PID).
-  local pids pid
-  for p in "$BACKEND_PORT" "$FRONTEND_PORT"; do
-    pids=$(lsof -ti tcp:"$p" 2>/dev/null || true)
-    for pid in $pids; do
-      kill "$pid" 2>/dev/null || true
-    done
+  mkdir -p "$RUNTIME_DIR"
+
+  # Restart is bounded: stop only OUR previous group first.
+  cmd_stop >/dev/null 2>&1 || true
+
+  # Refuse to kill foreign processes: if a port is held by something we do not
+  # own, report it precisely and abort.
+  local port own foreign=0
+  for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
+    own="$(port_ownership "$port")"
+    case "$own" in
+      foreign:*)
+        c_red "port $port occupied by foreign process (${own#foreign:}); not killing it"
+        foreign=1
+        ;;
+    esac
   done
-  # Fully detach: new session, stdio to the log, stdin from /dev/null. This
-  # keeps the long-running frontend dev server from holding the caller's
-  # stdout/stderr open (which would hang `doctor`).
+  [ "$foreign" -eq 1 ] && {
+    c_red "start: aborted — free the foreign port(s) or change BACKEND_PORT/FRONTEND_PORT"
+    return 1
+  }
+
+  # Launch in a NEW session/process group; record the leader PID as the PGID.
   setsid bash -c "cd '$REPO_ROOT' && exec make run \
       BACKEND_HOST=0.0.0.0 BACKEND_PORT='$BACKEND_PORT' \
       FRONTEND_HOST=0.0.0.0 FRONTEND_PORT='$FRONTEND_PORT'" \
-      >>"$LOG" 2>&1 < /dev/null &
-  disown 2>/dev/null || true
+    >>"$LOG" 2>&1 </dev/null &
+  local leader=$!
+  echo "$leader" >"$PIDFILE"
+
   log "waiting for backend on :$BACKEND_PORT (max 90s)"
-  for _ in $(seq 1 90); do
-    [ "$(http_code "$BACKEND/alive")" = "200" ] && { c_green "backend: up"; break; }
+  local i
+  for i in $(seq 1 90); do
+    [ "$(http_code "$BACKEND/alive")" = "200" ] && {
+      c_green "backend: up"
+      break
+    }
     sleep 1
   done
-  [ "$(http_code "$BACKEND/alive")" = "200" ] || { c_red "backend did not become healthy"; return 1; }
-  for _ in $(seq 1 30); do
-    [ "$(http_code "$FRONTEND/")" = "200" ] && { c_green "frontend: up"; break; }
+  [ "$(http_code "$BACKEND/alive")" = "200" ] || {
+    c_red "backend did not become healthy"
+    return 1
+  }
+  for i in $(seq 1 30); do
+    [ "$(http_code "$FRONTEND/")" = "200" ] && {
+      c_green "frontend: up"
+      break
+    }
     sleep 1
   done
 }
 
 cmd_status() {
   echo "repo    = $REPO_ROOT"
-  echo "branch  = $(cd "$REPO_ROOT" && git branch --show-current 2>/dev/null)"
-  echo "head    = $(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null)"
+  echo "branch  = $(git -C "$REPO_ROOT" branch --show-current 2>/dev/null)"
+  echo "head    = $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)"
   echo "backend = $(http_code "$BACKEND/alive") ($BACKEND/alive)"
   echo "frontend= $(http_code "$FRONTEND/") ($FRONTEND/)"
+  echo "owned-pgid = $(owned_pgid || echo none)"
 }
 
 cmd_health() {
   local a f
-  a="$(http_code "$BACKEND/alive")"; f="$(http_code "$FRONTEND/")"
-  echo "backend /alive = $a"; echo "frontend /     = $f"
-  [ "$a" = "200" ] && [ "$f" = "200" ] && { c_green "health: PASS"; return 0; }
-  c_red "health: FAIL"; return 1
+  a="$(http_code "$BACKEND/alive")"
+  f="$(http_code "$FRONTEND/")"
+  echo "backend /alive = $a"
+  echo "frontend /     = $f"
+  if [ "$a" = "200" ] && [ "$f" = "200" ]; then
+    c_green "health: PASS"
+    return 0
+  fi
+  c_red "health: FAIL"
+  return 1
 }
 
 cmd_verify() {
-  ( cd "$REPO_ROOT/quantum-agent" && corepack pnpm quantum verify )
+  # Non-mutating README-contract verify.
+  qa_pnpm exec tsx src/cli.ts verify
 }
 
 cmd_skill_new() {
-  [ $# -ge 1 ] || { echo "usage: openhands-cloud skill-new <description>"; return 2; }
-  ( cd "$REPO_ROOT/quantum-agent" && corepack pnpm quantum skill new "$*" )
+  [ $# -ge 1 ] || {
+    echo "usage: openhands-cloud skill-new <description>"
+    return 2
+  }
+  qa_pnpm quantum skill new "$*"
 }
 
 cmd_skill_validate() {
   local path="${1:-}"
-  [ -n "$path" ] || { echo "usage: openhands-cloud skill-validate <path-to-SKILL.md-or-dir>"; return 2; }
+  [ -n "$path" ] || {
+    echo "usage: openhands-cloud skill-validate <path-to-SKILL.md-or-dir>"
+    return 2
+  }
   [ -d "$path" ] && path="$path/SKILL.md"
-  [ -f "$path" ] || { c_red "no SKILL.md at $path"; return 1; }
+  [ -f "$path" ] || {
+    c_red "no SKILL.md at $path"
+    return 1
+  }
   python3 - "$path" <<'PY'
 import sys, re
 p = sys.argv[1]
@@ -152,21 +325,28 @@ PY
 }
 
 # --------------------------------------------------------------------- doctor
-# A bounded, self-healing diagnosis. Each check runs once; transient checks get
-# ONE repair attempt (start the app) and ONE rerun. Never loops unboundedly.
+declare -a R_NAME R_STATUS R_MS R_EXIT R_CMD R_DETAIL
 
-declare -a R_NAME R_STATUS R_MS R_DETAIL
+record() {
+  R_NAME+=("$1")
+  R_STATUS+=("$2")
+  R_MS+=("$3")
+  R_EXIT+=("$4")
+  R_CMD+=("$5")
+  R_DETAIL+=("$(printf '%s' "$6" | tr -d '\t' | tr '\n' ' ')")
+}
 
-record() { R_NAME+=("$1"); R_STATUS+=("$2"); R_MS+=("$3"); R_DETAIL+=("$4"); }
-
-run_check() { # name cmd  -> echoes status, records timing
-  local name="$1"; shift
+run_check() { # name cmd-desc probe...
+  local name="$1" cmd="$2"
+  shift 2
   local t0 t1 out rc
   t0=$(date +%s%3N)
-  out="$("$@" 2>&1)"; rc=$?
+  out="$("$@" 2>&1)"
+  rc=$?
   t1=$(date +%s%3N)
-  local status="PASS"; [ $rc -ne 0 ] && status="FAIL"
-  record "$name" "$status" "$(( t1 - t0 ))" "$(echo "$out" | tail -1 | tr '"' "'" )"
+  local status="PASS"
+  [ $rc -ne 0 ] && status="FAIL"
+  record "$name" "$status" "$((t1 - t0))" "$rc" "$cmd" "$(printf '%s' "$out" | tail -1)"
   if [ "$status" = "PASS" ]; then
     c_green "  [PASS] $name (${R_MS[-1]}ms)"
   else
@@ -175,14 +355,17 @@ run_check() { # name cmd  -> echoes status, records timing
   return $rc
 }
 
-chk_install() { [ -x "$POETRY" ] && "$POETRY" -C "$REPO_ROOT" run python -c "import openhands" >/dev/null 2>&1 \
-                && [ -d "$REPO_ROOT/frontend/node_modules" ]; }
-chk_backend()  { [ "$(http_code "$BACKEND/alive")" = "200" ] && [ "$(http_code "$BACKEND/health")" = "200" ]; }
+chk_install() {
+  qa_poetry run python -c "import openhands" >/dev/null 2>&1 && [ -d "$REPO_ROOT/frontend/node_modules" ]
+}
+chk_backend() { [ "$(http_code "$BACKEND/alive")" = "200" ] && [ "$(http_code "$BACKEND/health")" = "200" ]; }
 chk_frontend() { [ "$(http_code "$FRONTEND/")" = "200" ]; }
-chk_build()    { [ -f "$REPO_ROOT/frontend/package.json" ] && [ -d "$REPO_ROOT/frontend/node_modules/vite" ]; }
-chk_network()  { [ "$(http_code https://api.github.com)" != "000" ]; }
+# Truthful name: this verifies the frontend BUILD TOOLCHAIN is present (vite),
+# not that a production build succeeds (the full build runs in CI).
+chk_build_toolchain() { [ -f "$REPO_ROOT/frontend/package.json" ] && [ -d "$REPO_ROOT/frontend/node_modules/vite" ]; }
+chk_network() { [ "$(http_code https://api.github.com)" != "000" ]; }
 chk_migration013() {
-  "$POETRY" -C "$REPO_ROOT" run python - <<'PY' 2>/dev/null
+  qa_poetry run python - <<'PY' 2>/dev/null
 import os, sqlite3, sys
 db = os.path.expanduser(os.environ.get("OH_PERSISTENCE_DIR", "~/.openhands") + "/openhands.db")
 try:
@@ -197,87 +380,140 @@ PY
 chk_localsandbox() {
   local resp sid st
   resp="$(curl -s --max-time 40 -X POST "$BACKEND/api/v1/sandboxes" 2>/dev/null)"
-  sid="$(echo "$resp" | python3 -c 'import sys,json;
+  sid="$(printf '%s' "$resp" | python3 -c 'import sys,json
 try: print(json.loads(sys.stdin.read()).get("id",""))
 except Exception: print("")' 2>/dev/null)"
-  [ -n "$sid" ] || { echo "$resp"; return 1; }
-  st="$(curl -s "$BACKEND/api/v1/sandboxes?id=$sid" | python3 -c 'import sys,json;
+  [ -n "$sid" ] || {
+    echo "$resp"
+    return 1
+  }
+  st="$(curl -s "$BACKEND/api/v1/sandboxes?id=$sid" | python3 -c 'import sys,json
 d=json.load(sys.stdin); print((d[0] if isinstance(d,list) else d).get("status",""))' 2>/dev/null)"
   curl -s -X DELETE "$BACKEND/api/v1/sandboxes/$sid?sandbox_id=$sid" >/dev/null 2>&1
   [ "$st" = "RUNNING" ]
 }
-chk_quantum()  { ( cd "$REPO_ROOT/quantum-agent" && corepack pnpm green >/dev/null 2>&1 ); }
+chk_quantum() {
+  # Non-mutating gate (biome check, NOT --write) + typecheck + tests + verify.
+  qa_pnpm exec biome check . >/dev/null 2>&1 &&
+    qa_pnpm exec tsc -p tsconfig.json --noEmit >/dev/null 2>&1 &&
+    qa_pnpm exec vitest run >/dev/null 2>&1 &&
+    qa_pnpm exec tsx src/cli.ts verify >/dev/null 2>&1
+}
 chk_repo_isolation() { python3 "$REPO_ROOT/scripts/check-repo-isolation.py" --repo-root "$REPO_ROOT" >/dev/null 2>&1; }
-chk_secrets()  {
-  # Non-failing informational check: report which known secret NAMES are set.
-  local found=""
-  for n in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY LLM_API_KEY; do
+chk_secrets() {
+  local found="" n
+  for n in "${SECRET_NAMES[@]}"; do
     [ -n "${!n:-}" ] && found="$found $n"
   done
   [ -n "$found" ] && echo "present:$found" || echo "none set (live provider calls unavailable)"
   return 0
 }
 
-cmd_doctor() {
-  R_NAME=(); R_STATUS=(); R_MS=(); R_DETAIL=()
-  echo "== openhands-cloud doctor =="
-  run_check install       chk_install || true
-  run_check network       chk_network || true
-  run_check secrets       chk_secrets || true
+emit_report_json() {
+  local out="$1" n=${#R_NAME[@]} i
+  local contract_sha=""
+  [ -f "$REPO_ROOT/experiments/contract.lock.json" ] &&
+    contract_sha="$(python3 -c "import json;print(json.load(open('$REPO_ROOT/experiments/contract.lock.json')).get('bundle_sha256',''))" 2>/dev/null || true)"
+  {
+    for i in $(seq 0 $((n - 1))); do
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${R_NAME[$i]}" "${R_STATUS[$i]}" "${R_MS[$i]}" "${R_EXIT[$i]}" "${R_CMD[$i]}" "${R_DETAIL[$i]}"
+    done
+  } | OHC_REPORT_OUT="$out" \
+    OHC_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    OHC_HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" \
+    OHC_BASE_SHA="$(git -C "$REPO_ROOT" merge-base origin/main HEAD 2>/dev/null || echo "$FROZEN_BASE_SHA")" \
+    OHC_CONTRACT_SHA="$contract_sha" \
+    python3 -c '
+import sys, json, hashlib, os
+checks = []
+for line in sys.stdin.read().splitlines():
+    if not line:
+        continue
+    parts = line.split("\t")
+    parts += [""] * (6 - len(parts))
+    name, status, ms, exit_, cmd, detail = parts[:6]
+    checks.append({
+        "name": name, "status": status, "ms": int(ms or 0),
+        "exit": int(exit_ or 0), "command": cmd, "detail": detail,
+    })
+checks_ser = json.dumps(checks, sort_keys=True, separators=(",", ":"))
+report = {
+    "generated_at": os.environ.get("OHC_TS", ""),
+    "base_sha": os.environ.get("OHC_BASE_SHA", ""),
+    "head_sha": os.environ.get("OHC_HEAD_SHA", ""),
+    "contract_bundle_sha256": os.environ.get("OHC_CONTRACT_SHA", ""),
+    "checks": checks,
+    "checks_sha256": hashlib.sha256(checks_ser.encode()).hexdigest(),
+}
+with open(os.environ["OHC_REPORT_OUT"], "w") as f:
+    f.write(json.dumps(report, indent=2) + "\n")
+'
+}
 
-  # Backend is a transient service: if down, attempt ONE repair (start) + rerun.
-  if ! run_check backend chk_backend; then
-    local backend_idx=$(( ${#R_NAME[@]} - 1 ))
-    log "backend down — attempting bounded repair (start), then one rerun"
+cmd_doctor() {
+  R_NAME=()
+  R_STATUS=()
+  R_MS=()
+  R_EXIT=()
+  R_CMD=()
+  R_DETAIL=()
+  echo "== openhands-cloud doctor =="
+  run_check install "poetry import openhands + frontend node_modules" chk_install || true
+  run_check network "GET api.github.com" chk_network || true
+  run_check secrets "provider secret NAMES present" chk_secrets || true
+
+  if ! run_check backend "GET /alive + /health" chk_backend; then
+    local backend_idx=$((${#R_NAME[@]} - 1))
+    log "backend down — bounded repair (start), then one rerun"
     cmd_start >/dev/null 2>&1 || true
-    if run_check backend-rerun chk_backend; then
-      # Transient healed: relabel the original failure so it is not terminal.
+    if run_check backend-rerun "GET /alive + /health" chk_backend; then
       R_STATUS[backend_idx]="REPAIRED"
     fi
   fi
-  run_check frontend      chk_frontend || true
-  run_check build         chk_build || true
-  run_check migration013  chk_migration013 || true
-  run_check local-sandbox chk_localsandbox || true
-  run_check quantum-green  chk_quantum || true
-  run_check repo-isolation chk_repo_isolation || true
+  run_check frontend "GET frontend /" chk_frontend || true
+  run_check build-toolchain "frontend vite present" chk_build_toolchain || true
+  run_check migration013 "alembic>=013 + execution_status" chk_migration013 || true
+  run_check local-sandbox "POST /api/v1/sandboxes -> RUNNING" chk_localsandbox || true
+  run_check quantum-green "biome check + tsc + vitest + verify" chk_quantum || true
+  run_check repo-isolation "check-repo-isolation.py" chk_repo_isolation || true
 
-  # Emit machine-readable report (built in bash for portability).
-  {
-    echo "{"
-    echo "  \"generated_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
-    echo "  \"checks\": ["
-    local n=${#R_NAME[@]} i
-    for i in $(seq 0 $((n-1))); do
-      local sep=","; [ "$i" -eq $((n-1)) ] && sep=""
-      printf '    {"name":"%s","status":"%s","ms":%s,"detail":"%s"}%s\n' \
-        "${R_NAME[$i]}" "${R_STATUS[$i]}" "${R_MS[$i]}" "${R_DETAIL[$i]}" "$sep"
-    done
-    echo "  ]"
-    echo "}"
-  } > "$REPORT"
-
-  local fails=0 i
-  for i in "${!R_STATUS[@]}"; do [ "${R_STATUS[$i]}" = "FAIL" ] && fails=$((fails+1)); done
+  emit_report_json "$REPORT"
   echo "report: $REPORT"
-  if [ "$fails" -eq 0 ]; then c_green "doctor: PASS (all ${#R_NAME[@]} checks)"; return 0; fi
-  c_red "doctor: FAIL ($fails/${#R_NAME[@]} checks failed)"; return 1
+  local fails=0 i
+  for i in "${!R_STATUS[@]}"; do [ "${R_STATUS[$i]}" = "FAIL" ] && fails=$((fails + 1)); done
+  if [ "$fails" -eq 0 ]; then
+    c_green "doctor: PASS (all ${#R_NAME[@]} checks)"
+    return 0
+  fi
+  c_red "doctor: FAIL ($fails/${#R_NAME[@]} checks failed)"
+  return 1
 }
 
 # --------------------------------------------------------------------- dispatch
 main() {
-  local cmd="${1:-help}"; shift || true
+  local cmd="${1:-help}"
+  shift || true
   case "$cmd" in
-    setup)          cmd_setup "$@" ;;
-    start)          cmd_start "$@" ;;
-    status)         cmd_status "$@" ;;
-    health)         cmd_health "$@" ;;
-    verify)         cmd_verify "$@" ;;
-    doctor)         cmd_doctor "$@" ;;
-    skill-new)      cmd_skill_new "$@" ;;
+    setup) cmd_setup "$@" ;;
+    start) cmd_start "$@" ;;
+    stop) cmd_stop "$@" ;;
+    status) cmd_status "$@" ;;
+    health) cmd_health "$@" ;;
+    verify) cmd_verify "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    skill-new) cmd_skill_new "$@" ;;
     skill-validate) cmd_skill_validate "$@" ;;
-    help|-h|--help) usage ;;
-    *) echo "unknown command: $cmd"; echo; usage; exit 2 ;;
+    help | -h | --help) usage ;;
+    *)
+      echo "unknown command: $cmd"
+      echo
+      usage
+      exit 2
+      ;;
   esac
 }
-main "$@"
+
+if [ "${OHC_LIB_ONLY:-}" != "1" ]; then
+  main "$@"
+fi

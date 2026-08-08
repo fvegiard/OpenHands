@@ -36,7 +36,11 @@ jobs:
         run: |
           shellcheck --version
           bash -n scripts/openhands-cloud
-          shellcheck scripts/openhands-cloud
+          bash -n scripts/test-openhands-cloud.sh
+          shellcheck scripts/openhands-cloud scripts/test-openhands-cloud.sh
+
+      - name: openhands-cloud E2E (ports/JSON/no-corepack/self-heal/non-mutating)
+        run: bash scripts/test-openhands-cloud.sh
 
       - name: CLI help + skill-validate self-test
         run: |

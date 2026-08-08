@@ -45,10 +45,10 @@ Exit code is `0` only when every check is `PASS` or `REPAIRED`.
 | `secrets` | which known secret **names** are set (values never printed) |
 | `backend` | `GET /alive` and `/health` return 200 |
 | `frontend` | Vite dev server returns 200 |
-| `build` | frontend build toolchain present (`vite` resolvable) |
+| `build-toolchain` | frontend build **toolchain** present (`vite` resolvable) — not a full production build (that runs in CI) |
 | `migration013` | SQLite `alembic_version >= 013` and `conversation_metadata.execution_status` exists |
 | `local-sandbox` | `POST /api/v1/sandboxes` reaches `RUNNING` (the local process-sandbox path) then cleans up |
-| `quantum-green` | `pnpm green` (lint + typecheck + tests + README verify) in `quantum-agent` |
+| `quantum-green` | non-mutating gate in `quantum-agent`: `biome check` (never `--write`) + `tsc --noEmit` + `vitest run` + README `verify` |
 | `repo-isolation` | no writable upstream remote and no auto upstream-sync / push-to-main workflow (`scripts/check-repo-isolation.py`) |
 
 ## Bounded self-heal (no infinite loop)
