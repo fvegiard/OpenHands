@@ -52,6 +52,22 @@ git log --oneline $BASE..HEAD -- quantum-agent/test/init-and-sources.test.ts # b
 - `quantum / green` (Node 22.12 Linux, required) and `green-node26-compat`
   (Node 26 Linux): 20 files / **83 tests** green.
 
+## Pinned runtime (deterministic install — no floating major)
+
+The stable default lane pins an **exact** Node version; a floating `"22"` would
+violate the deterministic-install contract and is not used.
+
+| Setting | Value | Where |
+|---|---|---|
+| Stable lane Node (exact) | **`22.23.2`** (Node 22 LTS; archive updated 2026-07-28) | `.github/workflows/quantum.yml` `green` job `node-version` |
+| Engine minimum | **`>=22.13.0`** (first unflagged `node:sqlite`) | `quantum-agent/package.json` `engines.node` |
+| Package manager | `pnpm@10.18.2` (repo-pinned) | `pnpm/action-setup@v6` |
+| Compat lanes (non-default) | Node `26` (Linux + Windows) | `green-node26-compat`, `green-windows-node26-compat` |
+| Pinned since | commit `a16c6fbe9` | — |
+
+The exact 22.12.0 patch is intentionally NOT used (it lacks unflagged
+`node:sqlite`); we do not add `--experimental-sqlite`.
+
 ## Node 26 platform verdicts (kept separate — no universal-support claim)
 
 Node 26 is a **compatibility lane**, not the supported default (that is Node 22
