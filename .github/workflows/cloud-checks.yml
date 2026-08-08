@@ -8,14 +8,15 @@ on:
   push:
     branches: [main]
     paths:
-      - "scripts/openhands-cloud"
+      - "scripts/**"
       - ".agents/skills/**"
+      - "quantum-agent/skills-core/**"
       - ".github/workflows/cloud-checks.yml"
   pull_request:
     paths:
-      - "scripts/openhands-cloud"
-      - "scripts/check-repo-isolation.py"
+      - "scripts/**"
       - ".agents/skills/**"
+      - "quantum-agent/skills-core/**"
       - ".github/workflows/**"
 
 jobs:
@@ -29,6 +30,11 @@ jobs:
       # (including a scheduled one).
       - name: Repository isolation
         run: python3 scripts/check-repo-isolation.py
+
+      # Generated .agents/skills copies must match canonical skills-core content
+      # + provenance; fails on drift, missing, or stale extra generated copies.
+      - name: Skills sync (no drift)
+        run: python3 scripts/check-skills-sync.py
 
       # Real gate (no masking): default severity, non-zero on ANY finding.
       # ubuntu-latest ships shellcheck, so no apt-get is needed.
