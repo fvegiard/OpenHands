@@ -62,22 +62,44 @@ export interface RuntimeAdapter {
   liveProbe(env?: NodeJS.ProcessEnv): Promise<LiveProbeResult>;
 }
 
+/** A module importer — injectable so adapters can be fake-SDK tested. */
+export type Importer = (specifier: string) => Promise<unknown>;
+
 /** Load an OPTIONAL runtime SDK by name without a compile-time dependency.
  * Using a string variable specifier keeps tsc from resolving uninstalled
  * optional providers; a failed import returns null (caller reports the exact
  * package to install — never a silent fallback). */
-export async function optionalImport(specifier: string): Promise<unknown> {
+export const optionalImport: Importer = async (specifier: string): Promise<unknown> => {
   try {
     return (await import(specifier)) as unknown;
   } catch {
     return null;
   }
-}
+};
 
+/** First present secret NAME (for reporting — never the value). */
 export function presentSecret(names: readonly string[], env: NodeJS.ProcessEnv): string | null {
   for (const n of names) {
     const v = env[n];
     if (typeof v === "string" && v.length > 0) return n;
   }
   return null;
+}
+
+/** First present secret VALUE (for wiring into an SDK constructor only).
+ * The value flows to the runtime SDK and is never logged, printed, or stored. */
+export function secretValue(names: readonly string[], env: NodeJS.ProcessEnv): string | undefined {
+  for (const n of names) {
+    const v = env[n];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/** Normalize a model reply for an exact-match probe (e.g. expect "pong"). */
+export function normalizeReply(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[.!]+$/, "");
 }

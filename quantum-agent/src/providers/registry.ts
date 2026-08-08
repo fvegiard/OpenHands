@@ -18,16 +18,18 @@ import { getPaths } from "../config.ts";
 export const RuntimeId = z.enum(["claude", "openai-agents", "codex"]);
 export type RuntimeId = z.infer<typeof RuntimeId>;
 
-/** Capabilities we track per runtime (see `provider status`). */
+// Capabilities we track per runtime (see `provider status`). Per-runtime claims
+// below are DERIVED FROM the adapter wiring that the fake-SDK conformance tests
+// assert (test/adapter-conformance.test.ts) — not aspirational. Do not add a
+// capability to a runtime unless its adapter wires it and a test proves it.
 export const CAPABILITIES = [
   "tools",
   "sessions",
-  "skills",
   "mcp",
   "permissions",
   "resume",
   "streaming",
-  "structuredOutput",
+  "usage",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -78,7 +80,9 @@ export const REGISTRY: Readonly<Record<RuntimeId, RuntimeSpec>> = {
     providers: ["anthropic", "bedrock", "vertex", "foundry"],
     defaultModel: "claude-opus-4-7",
     unattendedPermissionMode: "bypassPermissions",
-    capabilities: caps([...ALL]),
+    // Wired in claude.ts drive(): canUseTool, sessionId, mcpServers,
+    // permissionMode, resume, includePartialMessages, usage extraction.
+    capabilities: caps(["tools", "sessions", "mcp", "permissions", "resume", "streaming", "usage"]),
     claudeCoupled: true,
   },
   "openai-agents": {
@@ -89,7 +93,9 @@ export const REGISTRY: Readonly<Record<RuntimeId, RuntimeSpec>> = {
     providers: ["openai", "openai-compatible", "vercel-ai-sdk"],
     defaultModel: "gpt-5.1",
     unattendedPermissionMode: "auto-approve-tools",
-    capabilities: caps(["tools", "sessions", "mcp", "streaming", "structuredOutput", "resume"]),
+    // Wired in openai-agents.ts: Agent(tools) + run + usage mapping. Sessions/
+    // resume/mcp are NOT wired here, so they are not claimed.
+    capabilities: caps(["tools", "usage"]),
     claudeCoupled: false,
   },
   codex: {
@@ -100,7 +106,9 @@ export const REGISTRY: Readonly<Record<RuntimeId, RuntimeSpec>> = {
     providers: ["openai"],
     defaultModel: "gpt-5.1-codex",
     unattendedPermissionMode: "danger-full-access;approval=never",
-    capabilities: caps(["tools", "sessions", "permissions", "resume", "streaming"]),
+    // Wired in codex.ts: startThread (sessions) + resumeThread (resume) +
+    // sandboxMode/approvalPolicy (permissions) + thread.run (tools) + usage.
+    capabilities: caps(["tools", "sessions", "permissions", "resume", "usage"]),
     claudeCoupled: false,
   },
 };

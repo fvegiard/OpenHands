@@ -17,4 +17,7 @@ export function getAdapter(id: RuntimeId): RuntimeAdapter {
   return ADAPTERS[id];
 }
 
-export type { RuntimeAdapter } from "./adapter.ts";
+export type { Importer, RuntimeAdapter } from "./adapter.ts";
+export { makeClaudeAdapter } from "./claude.ts";
+export { makeCodexAdapter } from "./codex.ts";
+export { makeOpenAIAgentsAdapter } from "./openai-agents.ts";

@@ -44,7 +44,6 @@ export function newSessionId(): string {
 }
 
 export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<RunResult> {
-  const auth = resolveAuth();
   // Resolve the selected runtime and its adapter. Selecting a non-Claude
   // runtime changes the execution path; an explicitly selected but unavailable
   // runtime fails fast with a precise diagnostic (no silent fallback).
@@ -57,8 +56,13 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
         `${availability.reason}.`,
     );
   }
-  // The Claude runtime uses a mock transport only when no credential is present.
-  const willMock = runtimeConfig.runtime === "claude" && auth.mode === "mock";
+  // Auth is resolved for the SELECTED runtime only. Never report Anthropic/mock
+  // auth for an OpenAI or Codex execution: those runtimes only run with their own
+  // key present (else they threw above), so their auth mode is "api".
+  const claudeAuth = runtimeConfig.runtime === "claude" ? resolveAuth() : null;
+  const authMode: AuthResult["mode"] = claudeAuth ? claudeAuth.mode : "api";
+  // The Claude runtime uses a mock transport only when no Claude credential exists.
+  const willMock = runtimeConfig.runtime === "claude" && claudeAuth?.mode === "mock";
   const model = opts.model ?? runtimeConfig.model ?? runtimeConfig.runtime;
   const sessionId = opts.resume ?? newSessionId();
   touchSession(sessionId);
@@ -88,7 +92,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
     if (!wf) {
       const text = `[error] unknown workflow: ${opts.workflow}`;
       appendTranscript(sessionId, "assistant", text);
-      return { text, sessionId, auth: auth.mode, mock: willMock };
+      return { text, sessionId, auth: authMode, mock: willMock };
     }
     const result = await wf({
       prompt: promptWithSkill,
@@ -103,7 +107,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
     ].join("\n");
     appendTranscript(sessionId, "assistant", summary);
     reflect(sessionId, `workflow:${result.workflow}`, summary);
-    return { text: summary, sessionId, auth: auth.mode, mock: willMock };
+    return { text: summary, sessionId, auth: authMode, mock: willMock };
   }
 
   // autowebsearch: for coding-intent prompts, prime the agent with fresh 2026
@@ -134,7 +138,7 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
     const text = `# Quantum result\nIntent: ${result.routing.intent}\nBranches: ${result.measurement.totalBranches}\nTunneled: ${result.tunneled}\n\nWinner:\n${winner}`;
     appendTranscript(sessionId, "assistant", text);
     reflect(sessionId, prompt.slice(0, 200), text);
-    return { text, sessionId, auth: auth.mode, mock: willMock };
+    return { text, sessionId, auth: authMode, mock: willMock };
   }
 
   // Dispatch to the selected runtime's adapter (Claude / OpenAI Agents / Codex).
@@ -154,5 +158,5 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   );
   appendTranscript(sessionId, "assistant", out.text);
   reflect(sessionId, prompt.slice(0, 200), out.text);
-  return { text: out.text, sessionId, auth: auth.mode, mock: out.mock };
+  return { text: out.text, sessionId, auth: authMode, mock: out.mock };
 }
