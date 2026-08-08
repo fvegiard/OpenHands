@@ -205,7 +205,9 @@ function readPersisted(): Partial<RuntimeConfig> {
  */
 export function resolveRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
   const persisted = readPersisted();
-  const rawRuntime = env.QUANTUM_RUNTIME ?? persisted.runtime ?? "claude";
+  // Treat an empty env var as unset (|| not ??) so `QUANTUM_RUNTIME=` behaves
+  // like "default", not an invalid id. A non-empty invalid id still throws.
+  const rawRuntime = env.QUANTUM_RUNTIME || persisted.runtime || "claude";
   const parsedId = RuntimeId.safeParse(rawRuntime);
   if (!parsedId.success) {
     const allowed = RuntimeId.options.join(", ");
@@ -215,8 +217,8 @@ export function resolveRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runt
     );
   }
   const runtime = parsedId.data;
-  const provider = env.QUANTUM_PROVIDER ?? persisted.provider;
-  const model = env.QUANTUM_MODEL ?? persisted.model ?? REGISTRY[runtime].defaultModel;
+  const provider = env.QUANTUM_PROVIDER || persisted.provider;
+  const model = env.QUANTUM_MODEL || persisted.model || REGISTRY[runtime].defaultModel;
   return RuntimeConfigSchema.parse({ runtime, provider, model });
 }
 
@@ -278,25 +280,18 @@ export async function providerTest(
       message: `runtime not installed. ${status.diagnostic}`,
     };
   }
-  if (!status.secretPresent) {
-    return {
-      ok: true,
-      runtime: config.runtime,
-      model: config.model ?? status.model,
-      kind: "contract",
-      message:
-        `contract PASS (package installed). Live test skipped — set one of ` +
-        `[${status.secretEnvChecked.join(", ")}] as a Cursor Secret to enable billable live calls.`,
-    };
-  }
-  // A secret is present: a live billable call is permitted. We deliberately do
-  // not execute one here in the default test path to avoid surprise spend; the
-  // presence of the secret is the gate the caller asked for.
+  // Contract test only: this NEVER performs a call, so it never reports a live
+  // result. A real call is the opt-in `provider test --live` path, which uses
+  // the runtime adapter's liveProbe(). Claiming kind="live" here without a call
+  // would be an unsupported success claim.
+  const secretHint = status.secretPresent
+    ? `a secret in [${status.secretEnvChecked.join(", ")}] is set; run 'provider test --live' for a real call`
+    : `set one of [${status.secretEnvChecked.join(", ")}] then 'provider test --live' for a real call`;
   return {
     ok: true,
     runtime: config.runtime,
     model: config.model ?? status.model,
-    kind: "live",
-    message: `ready: package installed and a secret in [${status.secretEnvChecked.join(", ")}] is set.`,
+    kind: "contract",
+    message: `contract PASS (package installed). ${secretHint}.`,
   };
 }

@@ -21,6 +21,7 @@ import {
   runtimeStatus,
   validateProvider,
 } from "./providers/registry.ts";
+import { getAdapter } from "./runtimes/index.ts";
 import { start as startServer } from "./server.ts";
 import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skills/generate.ts";
 import {
@@ -281,13 +282,28 @@ provider
   });
 provider
   .command("test")
-  .description("Contract/live test the selected runtime (no silent fallback).")
-  .action(async () => {
+  .description("Contract test the selected runtime (default). Use --live for a real call.")
+  .option("--live", "perform a minimal real billable call (requires a secret)")
+  .action(async (opts: { live?: boolean }) => {
     const cfg = resolveRuntimeConfig();
-    const r = await providerTest(cfg);
-    console.log(`runtime=${r.runtime} model=${r.model} kind=${r.kind} ok=${r.ok}`);
-    console.log(r.message);
-    process.exitCode = r.ok ? 0 : 1;
+    if (!opts.live) {
+      const r = await providerTest(cfg);
+      console.log(`runtime=${r.runtime} model=${r.model} kind=${r.kind} ok=${r.ok}`);
+      console.log(r.message);
+      process.exitCode = r.ok ? 0 : 1;
+      return;
+    }
+    // Opt-in live probe: a minimal real call via the runtime adapter. Returns
+    // NOT VERIFIED (non-zero) when it was not actually executed.
+    const probe = await getAdapter(cfg.runtime).liveProbe();
+    const label = probe.status === "live" ? "live" : "NOT VERIFIED";
+    console.log(
+      `runtime=${cfg.runtime} provider=${probe.provider} model=${probe.model} kind=${label} ok=${probe.ok}` +
+        (probe.latencyMs !== undefined ? ` latencyMs=${probe.latencyMs}` : "") +
+        (probe.usage ? ` usage=${JSON.stringify(probe.usage)}` : ""),
+    );
+    console.log(probe.message);
+    process.exitCode = probe.status === "live" && probe.ok ? 0 : 1;
   });
 
 const workflow = program

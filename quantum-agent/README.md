@@ -80,7 +80,8 @@ exits — no silent fallback.
 quantum provider list                 # runtimes + required package/secret
 quantum provider status               # selected runtime, model, capabilities
 quantum provider select openai-agents --model gpt-5.1
-quantum provider test                 # contract test (live only if secret set)
+quantum provider test                 # contract test (no call)
+quantum provider test --live          # opt-in: minimal real call; NOT VERIFIED if not executed
 ```
 
 Selection precedence: `QUANTUM_RUNTIME` / `QUANTUM_PROVIDER` / `QUANTUM_MODEL`
