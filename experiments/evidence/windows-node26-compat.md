@@ -52,6 +52,21 @@ git log --oneline $BASE..HEAD -- quantum-agent/test/init-and-sources.test.ts # b
 - `quantum / green` (Node 22.12 Linux, required) and `green-node26-compat`
   (Node 26 Linux): 20 files / **83 tests** green.
 
+## Node 26 platform verdicts (kept separate — no universal-support claim)
+
+Node 26 is a **compatibility lane**, not the supported default (that is Node 22
+LTS `22.23.2`, engine floor `>=22.13.0`). Verdicts are recorded per platform and
+per SHA; they are not generalized across platforms.
+
+| Platform | SHA | Verdict | Evidence |
+|---|---|---|---|
+| **Node 26 Linux** | `12f56684` | **VERIFIED** | `green-node26-compat` job 93148486329 (run 31275589712) SUCCESS: identical frozen install + Biome + `tsc` + full Vitest + README verify |
+| **Node 26 Windows** | `12f56684` | **NOT VERIFIED** | frozen base `1f43ce8` and head `12f56684` both reproduce the 4 Windows/path/network-sensitive failures above (fixes landed later) |
+| Node 26 Windows | `b12afbd47` (later) | VERIFIED | `green-windows-node26-compat` SUCCESS after the cross-platform fixes (recorded above); does not retroactively change the `12f56684` verdict |
+
+"Node 26 Linux VERIFIED" does **not** imply "Node 26 Windows VERIFIED." The two
+lanes are evaluated independently.
+
 ## Branch-introduced items (must be green — they are)
 
 These were introduced by the provider branch (not base) and are fixed:
