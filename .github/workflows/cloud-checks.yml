@@ -14,14 +14,20 @@ on:
   pull_request:
     paths:
       - "scripts/openhands-cloud"
+      - "scripts/check-repo-isolation.py"
       - ".agents/skills/**"
-      - ".github/workflows/cloud-checks.yml"
+      - ".github/workflows/**"
 
 jobs:
   cloud-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Repository isolation gate: fails if a writable upstream remote or an
+      # automatic upstream-sync / push-to-main workflow is (re)introduced.
+      - name: Repository isolation
+        run: python3 scripts/check-repo-isolation.py
 
       - name: Shell syntax + shellcheck (doctor CLI)
         run: |

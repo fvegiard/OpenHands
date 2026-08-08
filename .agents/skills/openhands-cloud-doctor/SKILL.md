@@ -49,6 +49,7 @@ Exit code is `0` only when every check is `PASS` or `REPAIRED`.
 | `migration013` | SQLite `alembic_version >= 013` and `conversation_metadata.execution_status` exists |
 | `local-sandbox` | `POST /api/v1/sandboxes` reaches `RUNNING` (the local process-sandbox path) then cleans up |
 | `quantum-green` | `pnpm green` (lint + typecheck + tests + README verify) in `quantum-agent` |
+| `repo-isolation` | no writable upstream remote and no auto upstream-sync / push-to-main workflow (`scripts/check-repo-isolation.py`) |
 
 ## Bounded self-heal (no infinite loop)
 

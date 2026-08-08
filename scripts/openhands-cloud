@@ -200,6 +200,7 @@ d=json.load(sys.stdin); print((d[0] if isinstance(d,list) else d).get("status","
   [ "$st" = "RUNNING" ]
 }
 chk_quantum()  { ( cd "$REPO_ROOT/quantum-agent" && corepack pnpm green >/dev/null 2>&1 ); }
+chk_repo_isolation() { python3 "$REPO_ROOT/scripts/check-repo-isolation.py" --repo-root "$REPO_ROOT" >/dev/null 2>&1; }
 chk_secrets()  {
   # Non-failing informational check: report which known secret NAMES are set.
   local found=""
@@ -232,6 +233,7 @@ cmd_doctor() {
   run_check migration013  chk_migration013 || true
   run_check local-sandbox chk_localsandbox || true
   run_check quantum-green  chk_quantum || true
+  run_check repo-isolation chk_repo_isolation || true
 
   # Emit machine-readable report (built in bash for portability).
   {
