@@ -98,6 +98,70 @@ class TestProcessSandboxService:
         assert result is True
 
     @pytest.mark.asyncio
+    async def test_wait_for_server_ready_uses_loopback_not_docker_host(
+        self, process_sandbox_service
+    ):
+        """Health checks must target loopback, never host.docker.internal.
+
+        The process sandbox spawns a co-located child process that shares this
+        host's network namespace, so it is always reachable on 127.0.0.1 -
+        even when the app itself runs inside a container (a common false
+        positive for docker detection, e.g. a stray /.dockerenv). Rewriting the
+        URL to host.docker.internal makes the health check unresolvable and the
+        sandbox never reaches RUNNING.
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'status': 'ok'}
+        process_sandbox_service.httpx_client.get.return_value = mock_response
+
+        # Even if docker detection reports True, the URL must stay on loopback.
+        with patch(
+            'openhands.app_server.utils.environment.is_running_in_docker',
+            return_value=True,
+        ):
+            result = await process_sandbox_service._wait_for_server_ready(
+                9000, timeout=1
+            )
+
+        assert result is True
+        called_url = process_sandbox_service.httpx_client.get.call_args.args[0]
+        assert called_url == 'http://127.0.0.1:9000/alive'
+        assert 'host.docker.internal' not in called_url
+
+    @pytest.mark.asyncio
+    async def test_process_to_sandbox_info_url_uses_loopback(
+        self, process_sandbox_service
+    ):
+        """_process_to_sandbox_info must also health-check loopback only."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        process_sandbox_service.httpx_client.get.return_value = mock_response
+
+        with patch.object(
+            process_sandbox_service,
+            '_get_process_status',
+            return_value=SandboxStatus.RUNNING,
+        ):
+            process_info = ProcessInfo(
+                pid=1234,
+                port=9000,
+                user_id='test-user-id',
+                working_dir='/tmp/test',
+                session_api_key='test-key',
+                created_at=datetime.now(),
+                sandbox_spec_id='test-spec',
+            )
+            sandbox_info = await process_sandbox_service._process_to_sandbox_info(
+                'test-sandbox', process_info
+            )
+
+        assert sandbox_info.status == SandboxStatus.RUNNING
+        called_url = process_sandbox_service.httpx_client.get.call_args.args[0]
+        assert called_url == 'http://127.0.0.1:9000/alive'
+        assert 'host.docker.internal' not in called_url
+
+    @pytest.mark.asyncio
     async def test_wait_for_server_ready_timeout(self, process_sandbox_service):
         """Test waiting for server to be ready - timeout case."""
         # Mock failed response

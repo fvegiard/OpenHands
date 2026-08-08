@@ -42,9 +42,6 @@ from openhands.app_server.sandbox.sandbox_spec_service import (
     resolve_sandbox_spec,
 )
 from openhands.app_server.services.injector import InjectorState
-from openhands.app_server.utils.docker_utils import (
-    replace_localhost_hostname_for_docker,
-)
 
 _logger = logging.getLogger(__name__)
 
@@ -167,9 +164,12 @@ class ProcessSandboxService(SandboxService):
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                url = replace_localhost_hostname_for_docker(
-                    f'http://localhost:{port}/alive'
-                )
+                # The agent server is a co-located child process sharing this
+                # host's network namespace, so it is always reachable on the
+                # loopback interface. Do NOT rewrite to host.docker.internal:
+                # even when the app itself runs in a container, the spawned
+                # process is inside that same container.
+                url = f'http://127.0.0.1:{port}/alive'
                 response = await self.httpx_client.get(url, timeout=5.0)
                 if response.status_code == 200:
                     data = response.json()
@@ -218,9 +218,10 @@ class ProcessSandboxService(SandboxService):
             # the health check will fail, in which case the sandbox is still
             # STARTING (not ERROR) so callers keep polling instead of aborting.
             try:
-                url = replace_localhost_hostname_for_docker(
-                    f'http://localhost:{process_info.port}{self.health_check_path}'
-                )
+                # Co-located child process: always reachable on loopback.
+                # See _wait_for_server_ready for why host.docker.internal is
+                # wrong for the process sandbox.
+                url = f'http://127.0.0.1:{process_info.port}{self.health_check_path}'
                 response = await self.httpx_client.get(url, timeout=5.0)
                 if response.status_code == 200:
                     exposed_urls = [
