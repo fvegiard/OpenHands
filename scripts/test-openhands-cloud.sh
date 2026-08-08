@@ -65,6 +65,20 @@ else
 fi
 kill "$FOREIGN" 2>/dev/null || true
 
+echo "== test: start FAILS CLOSED when no listener inspector is available =="
+# Git Bash has no lsof; an unavailable/erroring inspector must NOT be read as
+# 'free'. Force no inspector and prove start refuses without launching/killing.
+rm -f "$OHC_RUNTIME_DIR/app.state.json"
+out="$(OHC_PORT_INSPECTOR=none cmd_start 2>&1)"
+rc=$?
+if [ "$rc" -ne 0 ] &&
+  printf '%s' "$out" | grep -qiE "no supported inspector|lsof, ss, or fuser" &&
+  [ ! -f "$OHC_RUNTIME_DIR/app.state.json" ]; then
+  pass "no inspector => start refused (fail-closed), named the missing capability, no launch"
+else
+  fail "start did not fail closed with no listener inspector (rc=$rc)"
+fi
+
 echo "== test: stop terminates+reaps OUR group and preserves a foreign process =="
 # Owned group: a setsid sleep (its own group leader); record durable state.
 setsid bash -c 'sleep 60' &

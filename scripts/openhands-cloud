@@ -233,10 +233,47 @@ verify_owned() {
   echo "$pgid"
 }
 
-# Classify the listener on port $1: owned|foreign:<pid>:<comm>|free
+_have() { command -v "$1" >/dev/null 2>&1; }
+
+# Which listener inspectors are usable here (deterministic order).
+port_inspector() {
+  # Test hook: force a specific inspector or 'none' to exercise fail-closed.
+  case "${OHC_PORT_INSPECTOR:-}" in
+    none) echo "none"; return 0 ;;
+    lsof | ss | fuser) echo "$OHC_PORT_INSPECTOR"; return 0 ;;
+  esac
+  if _have lsof; then echo lsof; return 0; fi
+  if _have ss; then echo ss; return 0; fi
+  if _have fuser; then echo fuser; return 0; fi
+  echo "none"
+}
+
+# Echo the PID listening on $1. Exit 0 = inspected OK (empty => genuinely free);
+# Exit 3 = UNKNOWN (no supported inspector). Command-not-found/error is NEVER
+# treated as free (fail-closed).
+listener_pid() {
+  local port="$1"
+  case "$(port_inspector)" in
+    lsof) lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1 ;;
+    ss)
+      ss -ltnH 2>/dev/null | awk -v p="$port" '
+        { n = split($4, a, ":"); if (a[n] == p) { if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); exit } } }'
+      ;;
+    fuser) fuser "$port/tcp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | head -1 ;;
+    *) return 3 ;;
+  esac
+  return 0
+}
+
+# Classify the listener on port $1: owned | foreign:<pid>:<comm> | free | unknown
 port_ownership() {
-  local port="$1" pid owner ours
-  pid="$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  local port="$1" pid rc owner ours
+  pid="$(listener_pid "$port")"
+  rc=$?
+  if [ "$rc" -eq 3 ]; then
+    echo "unknown"
+    return 0
+  fi
   [ -z "$pid" ] && {
     echo "free"
     return 0
@@ -295,18 +332,27 @@ cmd_start() {
   # Restart is bounded: stop only OUR previous group first.
   cmd_stop >/dev/null 2>&1 || true
 
-  # Refuse to kill foreign processes: if a port is held by something we do not
-  # own, report it precisely and abort.
-  local port own foreign=0
+  # Fail-closed port pre-flight. An UNKNOWN result (no supported listener
+  # inspector) or a FOREIGN holder aborts start — we never launch on an
+  # unverifiable port and never kill a foreign process.
+  local port own foreign=0 unknown=0
   for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
     own="$(port_ownership "$port")"
     case "$own" in
+      unknown)
+        c_red "port $port: cannot inspect listeners — no supported inspector found (need one of: lsof, ss, fuser)"
+        unknown=1
+        ;;
       foreign:*)
         c_red "port $port occupied by foreign process (${own#foreign:}); not killing it"
         foreign=1
         ;;
     esac
   done
+  [ "$unknown" -eq 1 ] && {
+    c_red "start: REFUSED (fail-closed) — install lsof, ss, or fuser so ports can be verified before launch"
+    return 1
+  }
   [ "$foreign" -eq 1 ] && {
     c_red "start: aborted — free the foreign port(s) or change BACKEND_PORT/FRONTEND_PORT"
     return 1
