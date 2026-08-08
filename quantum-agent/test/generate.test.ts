@@ -19,6 +19,19 @@ describe("self-extension generators", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("generateSkill produces a DRAFT with a fixture + two forward tests (no activation)", () => {
+    const root = tmp();
+    const f = generateSkill("Summarise open PRs nightly", { root });
+    expect(f.activated).toBe(false);
+    const fixture = readFileSync(f.fixture, "utf8");
+    expect(fixture).toContain("Example invocation");
+    const ft = JSON.parse(readFileSync(f.forwardTests, "utf8"));
+    expect(ft.activated).toBe(false);
+    expect(Array.isArray(ft.tests)).toBe(true);
+    expect(ft.tests).toHaveLength(2);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("generateSkill honours custom name + allowed-tools", () => {
     const root = tmp();
     const f = generateSkill("Custom", {

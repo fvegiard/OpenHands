@@ -213,7 +213,15 @@ skill.command("new <description...>").action((parts: string[]) => {
   }
   const file = generateSkill(description);
   const after = verifyAfter();
-  console.log(`wrote ${file.path} (${file.bytes} bytes); verify=${after.ok ? "ok" : "drift"}`);
+  console.log(
+    `wrote DRAFT ${file.path} (${file.bytes} bytes); verify=${after.ok ? "ok" : "drift"}`,
+  );
+  console.log(`  fixture:       ${file.fixture}`);
+  console.log(`  forward-tests: ${file.forwardTests} (2 tests)`);
+  console.log(
+    "  status: NOT activated — activate only after format validation AND both " +
+      "forward tests pass in fresh contexts.",
+  );
 });
 
 const provider = program

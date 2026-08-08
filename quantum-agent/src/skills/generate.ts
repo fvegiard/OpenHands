@@ -11,6 +11,16 @@ export interface GeneratedFile {
   bytes: number;
 }
 
+export interface GeneratedSkill extends GeneratedFile {
+  /** Fixture (example invocation) path. */
+  fixture: string;
+  /** Forward-tests spec (two fresh-context prompts) path. */
+  forwardTests: string;
+  /** A new skill is ALWAYS a draft: activate only after format validation and
+   * both forward tests pass. Never claim activation on generation. */
+  activated: false;
+}
+
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
@@ -36,7 +46,7 @@ export function generateSkill(
     pairedAgent?: string;
     root?: string;
   } = {},
-): GeneratedFile {
+): GeneratedSkill {
   const name = options.name ?? slug(description);
   if (!name) throw new Error("cannot derive skill name from description");
   const root = options.root ?? "./skills";
@@ -69,7 +79,52 @@ export function generateSkill(
   const path = join(dir, "SKILL.md");
   const content = `${fm.join("\n")}${body}`;
   writeFileSync(path, content);
-  return { path, bytes: content.length };
+
+  // A required fixture: an example invocation.
+  const fixtureDir = join(dir, "fixtures");
+  ensureDir(fixtureDir);
+  const fixture = join(fixtureDir, "example-invocation.md");
+  writeFileSync(
+    fixture,
+    `# Example invocation for ${name}\n\n` +
+      `\`\`\`bash\nquantum run --skill ${name} "${description.replace(/\n/g, " ").slice(0, 120)}"\n\`\`\`\n`,
+  );
+
+  // Two fresh-context forward tests. The skill is a DRAFT until both pass; the
+  // generator never marks it activated.
+  const forwardTests = join(dir, "forward-tests.json");
+  writeFileSync(
+    forwardTests,
+    `${JSON.stringify(
+      {
+        skill: name,
+        activated: false,
+        note: "Draft. Activate only after format validation AND both forward tests pass in fresh contexts.",
+        tests: [
+          {
+            id: "forward-1",
+            prompt: `Use the ${name} skill: ${description.replace(/\n/g, " ").slice(0, 120)}`,
+            expect: "skill loads and completes without error in a fresh context",
+          },
+          {
+            id: "forward-2",
+            prompt: `In a new session, apply ${name} to a second realistic, non-destructive case.`,
+            expect: "skill loads and completes without error in a fresh context",
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  return {
+    path,
+    bytes: content.length,
+    fixture,
+    forwardTests,
+    activated: false,
+  };
 }
 
 /**
