@@ -1,0 +1,51 @@
+name: transcript-conformance
+
+# No-drift + transcript-integrity gate for the multi-agent experiment.
+# Fails on contract drift or any non-conformant lane transcript. A lane that is
+# NOT VERIFIED here cannot contribute code to integration.
+on:
+  push:
+    branches: [main, agent/provider-neutral-autonomy, experiment/claude-agent, experiment/codex-agent, experiment/mavis-minimax-m3]
+    paths:
+      - "experiments/**"
+      - ".github/workflows/transcript-conformance.yml"
+  pull_request:
+    paths:
+      - "experiments/**"
+      - ".github/workflows/transcript-conformance.yml"
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Contract lock integrity (frozen bundle unchanged)
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+          lock = json.loads(Path("experiments/contract.lock.json").read_text())
+          files = {}
+          for rel in lock["files"]:
+              files[rel] = hashlib.sha256((Path("experiments") / rel).read_bytes()).hexdigest()
+          manifest = {"contract_version": lock["contract_version"], "files": files}
+          bundle = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+          bad = [r for r in lock["files"] if files[r] != lock["files"][r]]
+          if bad or bundle != lock["bundle_sha256"]:
+              print("contract drift: frozen bundle hash mismatch", bad)
+              sys.exit(1)
+          print("contract lock OK:", bundle)
+          PY
+
+      - name: Validate every lane transcript
+        run: |
+          set -e
+          shopt -s nullglob
+          found=0
+          for t in experiments/lanes/*/transcript.jsonl; do
+            found=1
+            echo "== $t =="
+            python3 experiments/harness/validate_transcript.py --transcript "$t"
+          done
+          if [ "$found" = "0" ]; then echo "no lane transcripts present (nothing to validate)"; fi

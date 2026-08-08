@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "format": "JSONL — one JSON object per line, append-only",
+  "common_fields": {
+    "seq": "integer, monotonic from 1, no gaps or duplicates",
+    "ts": "ISO-8601 UTC timestamp",
+    "type": "one of the event types below",
+    "prev_hash": "sha256 hex of the previous event's canonical form; 'GENESIS' for seq 1"
+  },
+  "event_types": {
+    "run_start": {"required": ["agent", "model", "runtime", "branch", "base_sha", "head_sha", "contract_bundle_sha256", "rubric_sha256"]},
+    "contract_ack": {"required": ["contract_bundle_sha256"]},
+    "message": {"required": ["role", "text"], "note": "role in {user, agent, system}"},
+    "tool_call": {"required": ["name", "args"], "note": "args must be redacted"},
+    "command": {"required": ["cmd", "cwd", "exit_code", "stdout_sha256", "stderr_sha256"], "optional": ["stdout_excerpt", "stderr_excerpt"]},
+    "changed_files": {"required": ["files"]},
+    "commit": {"required": ["sha", "message"]},
+    "test": {"required": ["name", "passed", "failed", "skipped"]},
+    "artifact": {"required": ["path", "sha256", "bytes"]},
+    "failure": {"required": ["where", "detail"]},
+    "retry": {"required": ["of", "attempt", "budget"]},
+    "verdict": {"required": ["result", "backed_by"], "note": "result in {VERIFIED, NOT_VERIFIED, PASS, FAIL}; backed_by is a list of event seqs"}
+  },
+  "integrity_rules": [
+    "exactly one run_start at seq 1; exactly one verdict as the last event",
+    "hash chain: prev_hash of event n equals sha256 of the canonical form of event n-1",
+    "every command has an integer exit_code and stdout/stderr sha256 (replayable)",
+    "no raw secret values anywhere (only [REDACTED]); env vars by NAME only",
+    "run_start.base_sha == frozen base; contract_bundle_sha256 and rubric_sha256 == contract.lock.json",
+    "a VERIFIED/PASS verdict must cite backed_by event seqs that exist and (for tests) show no failures"
+  ]
+}

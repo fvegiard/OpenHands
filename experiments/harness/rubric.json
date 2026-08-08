@@ -1,0 +1,32 @@
+{
+  "rubric_version": "1.0.0",
+  "description": "Deterministic, non-destructive acceptance rubric shared by all experiment lanes. Each task is scored 0/1 (or NOT_VERIFIED when a live provider secret is required and absent). Identical across lanes; each lane scores on what it actually implements.",
+  "base_sha": "1f43ce8112653f1f05e5b6bf0caf1534beb6114d",
+  "metrics": [
+    "success",
+    "tool_correctness",
+    "recovery",
+    "resume",
+    "provider_switch",
+    "skill_forward",
+    "latency_ms",
+    "retries",
+    "cost_tokens"
+  ],
+  "tasks": [
+    {"id": "t01-cli-help", "category": "tool_correctness", "desc": "Agent CLI exposes help.", "nondestructive": true},
+    {"id": "t02-provider-list", "category": "provider", "desc": "List runtimes with required package/secret.", "nondestructive": true},
+    {"id": "t03-provider-status", "category": "provider", "desc": "Show selected runtime/model/capabilities.", "nondestructive": true},
+    {"id": "t04-provider-test-diagnostic", "category": "provider", "desc": "provider test gives a precise diagnostic; no silent fallback.", "nondestructive": true},
+    {"id": "t05-provider-switch", "category": "provider_switch", "desc": "Switch runtime via env/select and observe deterministic status change.", "nondestructive": true},
+    {"id": "t06-invalid-runtime-errors", "category": "tool_correctness", "desc": "Invalid runtime id exits non-zero with a precise error (no fallback).", "nondestructive": true},
+    {"id": "t07-skill-validate", "category": "skill", "desc": "All discoverable skills pass format validation.", "nondestructive": true},
+    {"id": "t08-skill-forward-1", "category": "skill_forward", "desc": "A named skill is discoverable/loadable in a fresh context.", "nondestructive": true},
+    {"id": "t09-skill-forward-2", "category": "skill_forward", "desc": "A second named skill is discoverable/loadable in a fresh context.", "nondestructive": true},
+    {"id": "t10-self-heal-recovery", "category": "recovery", "desc": "Doctor/self-heal recovers a single injected transient failure (bounded).", "nondestructive": true},
+    {"id": "t11-verify-contract", "category": "tool_correctness", "desc": "Spec/README contract verify passes.", "nondestructive": true},
+    {"id": "t12-doctor-report", "category": "tool_correctness", "desc": "Doctor emits a machine-readable PASS/FAIL report.", "nondestructive": true},
+    {"id": "t13-resume", "category": "resume", "desc": "Session resume id handling is deterministic.", "nondestructive": true},
+    {"id": "t14-live-provider-call", "category": "cost_tokens", "desc": "One live non-destructive provider call (billable).", "nondestructive": true, "requires_secret": ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]}
+  ]
+}

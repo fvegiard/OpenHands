@@ -1,0 +1,10 @@
+{
+  "bundle_sha256": "fd50d17f927fa9e8a32ed24ed0bd78ecd74fdc132f8665656702143c73518473",
+  "contract_version": "1.0.0",
+  "files": {
+    "BRIEF.md": "2be12ead7ecf288a58c832d77e45983ed9c4ec151d89002cc0180dc1b30aac0b",
+    "CONTRACT.md": "d72f64054a4f7a240a82248a29f461356d8f694c96dd79c7f8d174e6e6c3a3ec",
+    "PROMPT.md": "3643de9f9a0a644ad9ba14d252c23cda43c6f5c19a4da13299c986a968ff39c9",
+    "harness/rubric.json": "3b3431ca675e90747980674703818974a9593b890a0c8b5869d5531f43f578af"
+  }
+}

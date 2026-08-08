@@ -1,0 +1,131 @@
+{
+  "summary": {
+    "lane": "synthesis",
+    "rubric_version": "1.0.0",
+    "head_sha": "f9d803be82c4535804c2c41096fe77f9ecacd8e3",
+    "generated_at": "2026-08-08T21:09:43Z",
+    "scored_tasks": 13,
+    "passed": 13,
+    "score_ratio": 1.0,
+    "not_verified": [
+      "t14-live-provider-call"
+    ],
+    "total_latency_ms": 9221,
+    "total_retries": 1,
+    "cost_tokens": "NOT_VERIFIED (no provider secret / no billable run)"
+  },
+  "results": [
+    {
+      "id": "t01-cli-help",
+      "category": "tool_correctness",
+      "status": "PASS",
+      "latency_ms": 854,
+      "retries": 0,
+      "note": "quantum --help"
+    },
+    {
+      "id": "t02-provider-list",
+      "category": "provider",
+      "status": "PASS",
+      "latency_ms": 1104,
+      "retries": 0,
+      "note": "runtimes+pkg/secret listed"
+    },
+    {
+      "id": "t03-provider-status",
+      "category": "provider",
+      "status": "PASS",
+      "latency_ms": 1070,
+      "retries": 0,
+      "note": "status shows runtime/model"
+    },
+    {
+      "id": "t04-provider-test-diagnostic",
+      "category": "provider",
+      "status": "PASS",
+      "latency_ms": 1154,
+      "retries": 0,
+      "note": "precise diagnostic"
+    },
+    {
+      "id": "t05-provider-switch",
+      "category": "provider_switch",
+      "status": "PASS",
+      "latency_ms": 1999,
+      "retries": 0,
+      "note": "env switch -> codex"
+    },
+    {
+      "id": "t06-invalid-runtime-errors",
+      "category": "tool_correctness",
+      "status": "PASS",
+      "latency_ms": 945,
+      "retries": 0,
+      "note": "invalid id -> precise error"
+    },
+    {
+      "id": "t07-skill-validate",
+      "category": "skill",
+      "status": "PASS",
+      "latency_ms": 1,
+      "retries": 0,
+      "note": "11 skills; bad=[]"
+    },
+    {
+      "id": "t08-skill-forward-1",
+      "category": "skill_forward",
+      "status": "PASS",
+      "latency_ms": 0,
+      "retries": 0,
+      "note": "self-heal discoverable at .agents/skills/self-heal/SKILL.md"
+    },
+    {
+      "id": "t09-skill-forward-2",
+      "category": "skill_forward",
+      "status": "PASS",
+      "latency_ms": 0,
+      "retries": 0,
+      "note": "skill-new discoverable at .agents/skills/skill-new/SKILL.md"
+    },
+    {
+      "id": "t10-self-heal-recovery",
+      "category": "recovery",
+      "status": "PASS",
+      "latency_ms": 0,
+      "retries": 1,
+      "note": "doctor bounded repair+rerun (1 retry)"
+    },
+    {
+      "id": "t11-verify-contract",
+      "category": "tool_correctness",
+      "status": "PASS",
+      "latency_ms": 887,
+      "retries": 0,
+      "note": "README contract verify"
+    },
+    {
+      "id": "t12-doctor-report",
+      "category": "tool_correctness",
+      "status": "PASS",
+      "latency_ms": 0,
+      "retries": 0,
+      "note": "machine-readable report supported"
+    },
+    {
+      "id": "t13-resume",
+      "category": "resume",
+      "status": "PASS",
+      "latency_ms": 1207,
+      "retries": 0,
+      "note": "resume id handled (mock transport)"
+    },
+    {
+      "id": "t14-live-provider-call",
+      "category": "cost_tokens",
+      "status": "NOT_VERIFIED",
+      "latency_ms": 0,
+      "retries": 0,
+      "note": "needs one of: CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY"
+    }
+  ]
+}
