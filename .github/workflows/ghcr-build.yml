@@ -21,6 +21,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ (github.head_ref && github.ref) || github.run_id }}
   cancel-in-progress: true
 
+# Permission contract with the reusable ./.github/workflows/_build-image.yml,
+# whose build/merge jobs request `packages: write`. GitHub validates a reusable
+# call's requested permissions against the CALLER at startup — BEFORE evaluating
+# the per-job `if:` — so without this block the caller only had the fork default
+# (`packages: read`) and the whole Docker workflow failed at startup.
+#
+# Granting `packages: write` here does NOT enable publishing from this private
+# fork: every build/push job below is gated with
+# `github.repository == 'All-Hands-AI/OpenHands' && ...fork != true`, which is
+# false here, so the reusable workflow is never invoked (no GHCR login, no push).
+# This is the explicit no-publish path — the token scope only satisfies the
+# reusable contract for jobs that never run on this repository.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build_app:
     name: App
