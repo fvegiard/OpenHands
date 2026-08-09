@@ -38,8 +38,13 @@ interface OpenAIAgentsSdk {
     agent: object,
     input: string,
   ) => Promise<{ finalOutput?: unknown; usage?: UsageLike; state?: { usage?: UsageLike } }>;
-  setDefaultOpenAIKey?: (key: string) => void;
-  setDefaultOpenAIClient?: (client: unknown) => void;
+  // Per-run, client-bound model classes (real exports of @openai/agents). We use
+  // these to isolate credentials per run — never the process-global setters.
+  OpenAIResponsesModel?: new (
+    client: unknown,
+    model: string,
+  ) => object;
+  OpenAIChatCompletionsModel?: new (client: unknown, model: string) => object;
 }
 interface OpenAIClientModule {
   default: new (opts: { apiKey?: string; baseURL?: string }) => object;
@@ -169,26 +174,31 @@ export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): Ru
     };
   };
 
-  // Wire the profile's key + base URL explicitly into the OpenAI Agents SDK.
-  // Only used for the DIRECT OpenAI path; the ai-sdk path never touches these
-  // globals so a non-OpenAI provider key cannot leak into the OpenAI client.
-  const wireCredentials = async (
+  // Build a per-run, client-bound model for the DIRECT OpenAI path. The profile's
+  // key/baseURL go into a fresh OpenAI client that is bound to THIS run's model
+  // instance — there is NO process-global mutation (no setDefaultOpenAIKey /
+  // setDefaultOpenAIClient), so sequential runs with different profiles cannot
+  // leak credentials into one another in a long-lived process.
+  const buildDirectModel = async (
     mod: OpenAIAgentsSdk,
     key: string | undefined,
-    baseUrl?: string,
-  ): Promise<void> => {
-    if (baseUrl) {
-      const clientMod = (await importer("openai")) as OpenAIClientModule | null;
-      if (!clientMod || typeof clientMod.default !== "function") {
-        throw new Error(
-          "base URL configured but the 'openai' client package is not installed (pnpm add openai).",
-        );
-      }
-      const client = new clientMod.default({ apiKey: key, baseURL: baseUrl });
-      if (typeof mod.setDefaultOpenAIClient === "function") mod.setDefaultOpenAIClient(client);
-    } else if (key && typeof mod.setDefaultOpenAIKey === "function") {
-      mod.setDefaultOpenAIKey(key);
+    baseUrl: string | undefined,
+    modelName: string,
+  ): Promise<object> => {
+    const clientMod = (await importer("openai")) as OpenAIClientModule | null;
+    if (!clientMod || typeof clientMod.default !== "function") {
+      throw new Error("openai client package not installed (pnpm add openai).");
     }
+    const client = new clientMod.default({ apiKey: key, baseURL: baseUrl });
+    const ModelCtor = mod.OpenAIResponsesModel ?? mod.OpenAIChatCompletionsModel;
+    if (typeof ModelCtor !== "function") {
+      // Fail closed rather than fall back to a process-global default key/client.
+      throw new Error(
+        "cannot isolate openai-agents credentials: no per-run model class " +
+          "(OpenAIResponsesModel / OpenAIChatCompletionsModel) — refusing global mutation.",
+      );
+    }
+    return new ModelCtor(client, modelName);
   };
 
   const drive = async (
@@ -203,11 +213,14 @@ export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): Ru
     const t0 = Date.now();
     const baseUrl = baseUrlOf(input, env, profile);
     const sec = resolveSecret(SECRETS, env, profile?.secretEnv);
-    const { model, provider, aisdk } = await resolveModel(input, env, profile, sec.value, baseUrl);
-    // Direct OpenAI: inject the key/client into the Agents SDK. ai-sdk provider:
-    // the key is already bound to that provider (or read from its own env) — do
-    // NOT set the OpenAI default key/client (secret isolation).
-    if (!aisdk) await wireCredentials(mod, sec.value, baseUrl);
+    const resolved = await resolveModel(input, env, profile, sec.value, baseUrl);
+    const { provider, aisdk } = resolved;
+    // ai-sdk provider: the key/baseURL are already bound to that provider (via its
+    // create<Provider> factory). Direct OpenAI: bind a per-run client to the model
+    // (no globals). Either way, nothing is written to a process-global default.
+    const model = aisdk
+      ? resolved.model
+      : await buildDirectModel(mod, sec.value, baseUrl, input.model);
     const agent = new mod.Agent({ name: "quantum", model, instructions: INSTRUCTIONS });
     const result = await mod.run(agent, input.prompt);
     const text =

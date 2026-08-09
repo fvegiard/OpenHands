@@ -138,6 +138,65 @@ describe("MiniMax profile (openai-agents + vercel-ai-sdk)", () => {
   });
 });
 
+// -------------------------------------- direct OpenAI profile isolation
+function openaiIsoFakes() {
+  const models: { clientOpts?: { apiKey?: string; baseURL?: string }; model: string }[] = [];
+  const setDefault = { key: false, client: false };
+  class FakeClient {
+    constructor(public opts: { apiKey?: string; baseURL?: string }) {}
+  }
+  const agents = {
+    Agent: class {
+      constructor(public cfg: unknown) {}
+    },
+    run: async () => ({ finalOutput: "ok" }),
+    OpenAIResponsesModel: class {
+      constructor(
+        public client: { opts?: { apiKey?: string; baseURL?: string } },
+        public model: string,
+      ) {
+        models.push({ clientOpts: client.opts, model });
+      }
+    },
+    setDefaultOpenAIKey: () => {
+      setDefault.key = true;
+    },
+    setDefaultOpenAIClient: () => {
+      setDefault.client = true;
+    },
+  };
+  return { models, setDefault, agents, openai: { default: FakeClient } };
+}
+
+describe("direct OpenAI isolation in a long-lived process", () => {
+  it("sequential cross-profile runs each bind their own client; no process-global mutation", async () => {
+    const { models, setDefault, agents, openai } = openaiIsoFakes();
+    const a = makeOpenAIAgentsAdapter(fakeImporter({ "@openai/agents": agents, openai }));
+    await a.run(
+      { prompt: "one", model: "gpt-a", sessionId: "s1" },
+      { KEY_A: "sk-a" } as NodeJS.ProcessEnv,
+      { secretEnv: "KEY_A", baseUrl: "https://a.example/v1" },
+    );
+    await a.run(
+      { prompt: "two", model: "gpt-b", sessionId: "s2" },
+      { KEY_B: "sk-b" } as NodeJS.ProcessEnv,
+      { secretEnv: "KEY_B", baseUrl: "https://b.example/v1" },
+    );
+    expect(models).toHaveLength(2);
+    expect(models[0]).toEqual({
+      clientOpts: { apiKey: "sk-a", baseURL: "https://a.example/v1" },
+      model: "gpt-a",
+    });
+    expect(models[1]).toEqual({
+      clientOpts: { apiKey: "sk-b", baseURL: "https://b.example/v1" },
+      model: "gpt-b",
+    });
+    // The forbidden process-global setters were never used.
+    expect(setDefault.key).toBe(false);
+    expect(setDefault.client).toBe(false);
+  });
+});
+
 // ------------------------------------------------------ red: secrets
 describe("provider profile secret handling (no fallback, no leakage)", () => {
   it("missing selected key => unavailable naming the exact env (no fallback to OPENAI_API_KEY)", async () => {
@@ -232,7 +291,6 @@ describe("codex resume via profile.resumeThreadId", () => {
     const thread = { run: async () => ({ finalResponse: "ok" }) };
     const sdk = {
       Codex: class {
-        constructor(_o: unknown) {}
         startThread(o: Record<string, unknown>) {
           cap.startOpts = o;
           return thread;

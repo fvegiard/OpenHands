@@ -78,14 +78,21 @@ describe("claude adapter wiring", () => {
 // ------------------------------------------------------- OpenAI Agents
 function openaiFakes() {
   const cap: {
-    key?: string;
     clientOpts?: { apiKey?: string; baseURL?: string };
-    setClientCalled?: boolean;
+    modelBoundClientOpts?: { apiKey?: string; baseURL?: string };
+    modelName?: string;
     agentModel?: unknown;
     ran?: { agent: object; input: string };
     aisdkArg?: unknown;
     providerFactoryArg?: string;
-  } = {};
+    setKeyCalled: boolean;
+    setClientCalled: boolean;
+  } = { setKeyCalled: false, setClientCalled: false };
+  class FakeClient {
+    constructor(public opts: { apiKey?: string; baseURL?: string }) {
+      cap.clientOpts = opts;
+    }
+  }
   const agents = {
     Agent: class {
       constructor(public cfg: { name: string; model: unknown; instructions?: string }) {
@@ -96,20 +103,26 @@ function openaiFakes() {
       cap.ran = { agent, input };
       return { finalOutput: "pong", usage: { inputTokens: 5, outputTokens: 2 } };
     },
-    setDefaultOpenAIKey: (k: string) => {
-      cap.key = k;
+    // Per-run, client-bound model class (the isolated path). We record the client
+    // opts bound into THIS model so tests can assert per-run isolation.
+    OpenAIResponsesModel: class {
+      constructor(
+        public client: { opts?: { apiKey?: string; baseURL?: string } },
+        public model: string,
+      ) {
+        cap.modelBoundClientOpts = client.opts;
+        cap.modelName = model;
+      }
+    },
+    // Process-global setters — MUST NOT be called (isolation). We record calls.
+    setDefaultOpenAIKey: (_k: string) => {
+      cap.setKeyCalled = true;
     },
     setDefaultOpenAIClient: (_c: unknown) => {
       cap.setClientCalled = true;
     },
   };
-  const openai = {
-    default: class {
-      constructor(public opts: { apiKey?: string; baseURL?: string }) {
-        cap.clientOpts = opts;
-      }
-    },
-  };
+  const openai = { default: FakeClient };
   const ext = {
     aisdk: (m: unknown) => {
       cap.aisdkArg = m;
@@ -126,26 +139,32 @@ function openaiFakes() {
 }
 
 describe("openai-agents adapter wiring", () => {
-  it("direct OpenAI: only @openai/agents; wires the named key; model is the bare string", async () => {
-    const { cap, agents } = openaiFakes();
-    const a = makeOpenAIAgentsAdapter(fakeImporter({ "@openai/agents": agents }));
+  it("direct OpenAI: binds a per-run client to the model; never mutates globals", async () => {
+    const { cap, agents, openai } = openaiFakes();
+    const a = makeOpenAIAgentsAdapter(fakeImporter({ "@openai/agents": agents, openai }));
     const r = await a.run(RUN, { OPENAI_API_KEY: "sk-openai-1" } as NodeJS.ProcessEnv);
-    expect(cap.key).toBe("sk-openai-1");
-    expect(cap.agentModel).toBe("test-model");
+    expect(cap.modelBoundClientOpts).toEqual({ apiKey: "sk-openai-1", baseURL: undefined });
+    expect(cap.modelName).toBe("test-model");
+    expect(cap.setKeyCalled).toBe(false); // no process-global mutation
+    expect(cap.setClientCalled).toBe(false);
     expect(cap.ran?.input).toBe("do a thing");
     expect(r.provider).toBe("openai");
     expect(r.usage).toEqual({ inputTokens: 5, outputTokens: 2, costUsd: undefined });
   });
 
-  it("base URL: constructs the openai client with {apiKey,baseURL} and sets it", async () => {
+  it("base URL: constructs the per-run client with {apiKey,baseURL}, no globals", async () => {
     const { cap, agents, openai } = openaiFakes();
     const a = makeOpenAIAgentsAdapter(fakeImporter({ "@openai/agents": agents, openai }));
     const r = await a.run(RUN, {
       OPENAI_API_KEY: "sk-openai-2",
       QUANTUM_BASE_URL: "https://proxy.example/v1",
     } as NodeJS.ProcessEnv);
-    expect(cap.clientOpts).toEqual({ apiKey: "sk-openai-2", baseURL: "https://proxy.example/v1" });
-    expect(cap.setClientCalled).toBe(true);
+    expect(cap.modelBoundClientOpts).toEqual({
+      apiKey: "sk-openai-2",
+      baseURL: "https://proxy.example/v1",
+    });
+    expect(cap.setClientCalled).toBe(false);
+    expect(cap.setKeyCalled).toBe(false);
     expect(r.provider).toBe("openai-compatible");
   });
 
