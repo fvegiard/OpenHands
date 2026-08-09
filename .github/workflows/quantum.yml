@@ -22,7 +22,9 @@ defaults:
 # (esbuild build-script approval is handled via package.json
 # pnpm.onlyBuiltDependencies; Biome runs clean with zero info.)
 env:
-  NODE_OPTIONS: "--disable-warning=DEP0205 --disable-warning=ExperimentalWarning"
+  # DEP0205: tsx module.register; DEP0190: pnpm/action-setup child_process on
+  # Node 26; ExperimentalWarning: the built-in node:sqlite we use deliberately.
+  NODE_OPTIONS: "--disable-warning=DEP0205 --disable-warning=DEP0190 --disable-warning=ExperimentalWarning"
 
 jobs:
   # Required stable lane: Node 22.12+ (the supported default). Deterministic
