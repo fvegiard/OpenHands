@@ -10,10 +10,12 @@
     "quantum": "tsx src/cli.ts",
     "dev": "tsx watch src/cli.ts",
     "test": "vitest run",
+    "test:json": "vitest run --reporter=default --reporter=json --outputFile=.vitest-results.json",
     "verify": "tsx src/cli.ts verify",
+    "verify:results": "tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results",
     "lint": "biome check . --write",
     "build": "tsc -p tsconfig.json --noEmit",
-    "green": "biome check . --write && tsc -p tsconfig.json --noEmit && vitest run && tsx src/cli.ts verify"
+    "green": "biome check . --write && tsc -p tsconfig.json --noEmit && pnpm test:json && pnpm verify:results"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.138",
@@ -39,5 +41,10 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@10.18.2"
+  "packageManager": "pnpm@10.18.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
 }

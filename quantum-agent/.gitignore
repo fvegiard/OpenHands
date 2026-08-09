@@ -15,3 +15,4 @@ skills/*
 # swallow our src/cache/ directory. Force-include it.
 !src/cache/
 !src/cache/**
+.vitest-results.json

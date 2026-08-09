@@ -4,7 +4,14 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execa } from "execa";
-import { discover, loadBody, type SkillBody, type SkillManifest } from "./loader.ts";
+import {
+  discover,
+  isPlaceholder,
+  loadBody,
+  loadManifest,
+  type SkillBody,
+  type SkillManifest,
+} from "./loader.ts";
 import { findPack, type Pack, parseSourcesFile } from "./sources.ts";
 import { translate, type TargetFormat } from "./translate.ts";
 
@@ -77,6 +84,19 @@ function writeOfflinePlaceholder(repo: string, target: string): string {
   return dest;
 }
 
+/** Valid, activatable skills found under `dest` — the SKILL.md at its root and/or
+ * one level down — excluding placeholders and unnamed/"unknown" manifests. Used
+ * as the ONLY success signal for an install (a bare directory is never enough). */
+function activatableSkills(dest: string): SkillManifest[] {
+  const out: SkillManifest[] = [];
+  const root = loadManifest(dest);
+  if (root && !isPlaceholder(root)) out.push(root);
+  out.push(...discover([dest]));
+  return out.filter(
+    (m) => !!m.frontmatter.name && m.frontmatter.name !== "unknown" && !isPlaceholder(m),
+  );
+}
+
 /** Skip the network clone (hermetic/deterministic) when explicitly requested. */
 function offlineSkills(): boolean {
   const v = process.env.QUANTUM_SKILLS_OFFLINE;
@@ -101,15 +121,29 @@ async function installGh(spec: string, target: string, cloner: Cloner): Promise<
   }
   try {
     await cloner(repo, dest);
-    // A clone that produced no SKILL.md is not a real skill — treat as failure.
-    if (!existsSync(join(dest, "SKILL.md")) && discover([dest]).length === 0) {
-      // Some repos nest skills; only fail if nothing skill-like landed.
-      const anyMd = existsSync(dest);
-      if (!anyMd) {
-        return { ...emptyResult(), failed: [spec], ok: false, notes: [`clone produced nothing for ${repo}`] };
+    // Fail closed unless the clone yielded at least one VALID, ACTIVATABLE skill.
+    // `existsSync(dest)` is always true after a clone, so it can never be the
+    // success signal — we require a real SKILL.md (root or one level down) with a
+    // usable name (not a placeholder, not "unknown").
+    const found = activatableSkills(dest);
+    if (found.length === 0) {
+      try {
+        rmSync(dest, { recursive: true, force: true });
+      } catch {
+        /* best-effort cleanup */
       }
+      return {
+        ...emptyResult(),
+        failed: [spec],
+        ok: false,
+        notes: [`clone produced no activatable SKILL.md for ${repo}`],
+      };
     }
-    return { ...emptyResult(), installed: [dest], notes: [`installed ${repo}`] };
+    return {
+      ...emptyResult(),
+      installed: [dest],
+      notes: [`installed ${repo} (${found.length} activatable skill(s))`],
+    };
   } catch (err) {
     // Clone genuinely failed (unavailable / private / bad repo). Remove any
     // partial directory and report a precise, nonzero failure. NEVER write a

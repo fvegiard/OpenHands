@@ -97,6 +97,68 @@ export interface CapViolation {
   detail: string;
 }
 
+/** Per-file test outcome from a CURRENT vitest run (passed/failed/skipped). */
+export interface FileTestOutcome {
+  passed: number;
+  failed: number;
+  skipped: number;
+  total: number;
+}
+
+interface VitestAssertion {
+  status?: string;
+}
+interface VitestFileResult {
+  name?: string;
+  status?: string;
+  assertionResults?: VitestAssertion[];
+}
+interface VitestJson {
+  testResults?: VitestFileResult[];
+}
+
+/** Parse a vitest `--reporter=json` file into a map keyed by repo-relative path.
+ * This is the current run's ground truth: a stale/failing/skipped/absent test can
+ * no longer authorize an `implemented` claim. */
+export function parseVitestResults(
+  jsonPath: string,
+  repoRoot: string = process.cwd(),
+): Map<string, FileTestOutcome> {
+  const out = new Map<string, FileTestOutcome>();
+  const data = JSON.parse(readFileSync(jsonPath, "utf8")) as VitestJson;
+  for (const fr of data.testResults ?? []) {
+    if (!fr.name) continue;
+    let rel = fr.name.replaceAll("\\", "/");
+    const root = repoRoot.replaceAll("\\", "/").replace(/\/$/, "");
+    if (rel.startsWith(`${root}/`)) rel = rel.slice(root.length + 1);
+    const asserts = fr.assertionResults ?? [];
+    const o: FileTestOutcome = { passed: 0, failed: 0, skipped: 0, total: 0 };
+    if (asserts.length > 0) {
+      for (const a of asserts) {
+        o.total += 1;
+        if (a.status === "passed") o.passed += 1;
+        else if (a.status === "failed") o.failed += 1;
+        else o.skipped += 1;
+      }
+    } else {
+      // No per-assertion detail: fall back to the file-level status.
+      o.total = 1;
+      if (fr.status === "passed") o.passed = 1;
+      else if (fr.status === "failed") o.failed = 1;
+      else o.skipped = 1;
+    }
+    out.set(rel, o);
+  }
+  return out;
+}
+
+export interface CapabilityCheckOptions {
+  /** Current-run vitest outcomes, keyed by repo-relative test path. */
+  results?: Map<string, FileTestOutcome>;
+  /** Require every `implemented` claim to be backed by a PASSING current-run test. */
+  requireResults?: boolean;
+}
+
 /**
  * Validate the README against the manifest. Returns violations (empty == pass):
  *   E_NO_EVIDENCE    an implemented claim has a missing/absent evidence file
@@ -109,14 +171,37 @@ export function checkCapabilities(
   readme: string,
   m: CapabilityManifest,
   repoRoot: string,
+  opts: CapabilityCheckOptions = {},
 ): CapViolation[] {
   const v: CapViolation[] = [];
+  const { results, requireResults } = opts;
   for (const c of m.capabilities) {
     if (c.status === "implemented") {
       if (!c.evidence) {
         v.push({ code: "E_NO_EVIDENCE", detail: `${c.id}: implemented but no evidence pointer` });
       } else if (!existsSync(join(repoRoot, c.evidence))) {
         v.push({ code: "E_NO_EVIDENCE", detail: `${c.id}: evidence not found: ${c.evidence}` });
+      } else if (requireResults) {
+        // The evidence file merely EXISTING is not enough: it must have run in the
+        // current suite and actually passed (not stale, skipped, or failing).
+        const rel = c.evidence.replaceAll("\\", "/");
+        const o = results?.get(rel);
+        if (!o) {
+          v.push({
+            code: "E_STALE_EVIDENCE",
+            detail: `${c.id}: evidence ${c.evidence} not in current test results`,
+          });
+        } else if (o.failed > 0) {
+          v.push({
+            code: "E_STALE_EVIDENCE",
+            detail: `${c.id}: evidence ${c.evidence} has ${o.failed} failing test(s)`,
+          });
+        } else if (o.passed < 1) {
+          v.push({
+            code: "E_STALE_EVIDENCE",
+            detail: `${c.id}: evidence ${c.evidence} ran no passing tests (skipped=${o.skipped})`,
+          });
+        }
       }
     }
     if (typeof c.count === "number") {

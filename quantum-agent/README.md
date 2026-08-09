@@ -31,6 +31,8 @@ _Generated from `capabilities.json` on 2026-08-09. External tools are NOT BENCHM
 | Capability-manifest semantic gate | implemented | `test/capabilities.test.ts` |
 | Local skills + installable Git sources (gh:owner/repo) | implemented | `test/skills.test.ts` |
 | skill new writes a DRAFT (activate only after format + 2 fresh-context tests) | implemented | `test/generate.test.ts` |
+| skill activate: DRAFT->ACTIVE after format + 2 fresh-context (subprocess) load tests | implemented | `test/skill-activation.test.ts` |
+| LLM behavioral forward-test of an activated skill | not implemented | fresh-context tests are deterministic load checks; a live LLM forward-test needs a provider secret (NOT_VERIFIED) |
 | Canned workflows (issue-to-pr, pr-review-merge, bug-repro-fix, rfc-hyperplan) | implemented | `test/workflows.test.ts` |
 | Post-task reflection to the local blackboard | implemented | `test/reflect.test.ts` |
 | Unattended permission gating | implemented | `test/permissions.test.ts` |
@@ -149,12 +151,22 @@ Install honesty:
   placeholder** under `.drafts/` that is never discovered or activated — it is
   reported under `placeholders`, never `installed`.
 
-## skill new is a DRAFT
+## skill new is a DRAFT; skill activate transitions it
 
 `quantum skill new` writes `SKILL.md` + a fixture + a two-case forward-test spec
-and marks the skill **DRAFT (not activated)**. Activation happens only after
-format validation AND both fresh-context forward tests pass; activation failure
-is explicit.
+and marks the skill **DRAFT (not activated)**.
+
+```bash
+quantum skill activate <name>
+```
+
+`skill activate` performs the state transition only after (1) format validation
+and (2) BOTH fresh-context forward tests pass — each runs in a **separate `tsx`
+subprocess** that loads the skill in a clean process (deterministic; no LLM, no
+network). On success it writes `activation.json`; on any failure it exits
+non-zero with an explicit reason and the skill stays a DRAFT. A full **LLM
+behavioral** forward-test needs a provider secret and is **NOT VERIFIED** here —
+never faked.
 
 ## Experimental
 

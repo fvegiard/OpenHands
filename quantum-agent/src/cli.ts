@@ -9,7 +9,7 @@ import { listAgents } from "./agents/registry.ts";
 import { resolveAuth } from "./auth.ts";
 import { watch } from "./automation/watcher.ts";
 import * as cache from "./cache/index.ts";
-import { checkCapabilities, loadManifest, readmePath } from "./capabilities.ts";
+import { checkCapabilities, loadManifest, parseVitestResults, readmePath } from "./capabilities.ts";
 import { lastSession } from "./memory.ts";
 import { see } from "./modal/vision.ts";
 import { transcribe } from "./modal/voice-in.ts";
@@ -26,6 +26,7 @@ import {
 } from "./providers/registry.ts";
 import { getAdapter } from "./runtimes/index.ts";
 import { start as startServer } from "./server.ts";
+import { activateSkill } from "./skills/activate.ts";
 import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skills/generate.ts";
 import {
   install,
@@ -136,19 +137,34 @@ program
 program
   .command("verify")
   .description("Verify the README matches the CLI AND every capability claim has evidence.")
-  .action(() => {
+  .option(
+    "--capabilities-results <path>",
+    "vitest JSON results to bind implemented claims to the current run",
+  )
+  .option(
+    "--require-results",
+    "fail unless every implemented claim is backed by a PASSING current-run test",
+  )
+  .action((opts: { capabilitiesResults?: string; requireResults?: boolean }) => {
     const r = verifyReadme();
     console.log(`blocks=${r.totalBlocks} lines=${r.totalLines} unknown=${r.unknown.length}`);
     for (const u of r.unknown) console.log(`- ${u.line}  // ${u.reason}`);
-    // Capability semantic gate: README claims must be backed by evidence.
+    // Capability semantic gate. With --capabilities-results it consumes the ACTUAL
+    // current-run outcomes so a stale/skipped/failing evidence test can no longer
+    // authorize an implemented claim.
     const root = process.cwd();
+    const results = opts.capabilitiesResults
+      ? parseVitestResults(opts.capabilitiesResults, root)
+      : undefined;
     const violations = checkCapabilities(
       readFileSync(readmePath(root), "utf8"),
       loadManifest(root),
       root,
+      { results, requireResults: !!opts.requireResults },
     );
+    const mode = opts.requireResults ? " (current-run evidence)" : "";
     console.log(
-      `capabilities: ${violations.length === 0 ? "OK" : `${violations.length} violation(s)`}`,
+      `capabilities${mode}: ${violations.length === 0 ? "OK" : `${violations.length} violation(s)`}`,
     );
     for (const c of violations) console.log(`- ${c.code}: ${c.detail}`);
     process.exitCode = r.ok && violations.length === 0 ? 0 : 1;
@@ -236,10 +252,29 @@ skill.command("new <description...>").action((parts: string[]) => {
   console.log(`  fixture:       ${file.fixture}`);
   console.log(`  forward-tests: ${file.forwardTests} (2 tests)`);
   console.log(
-    "  status: NOT activated — activate only after format validation AND both " +
-      "forward tests pass in fresh contexts.",
+    "  status: NOT activated — run `quantum skill activate " +
+      `${file.path.split("/").slice(-2, -1)[0]}\` to run format + two fresh-context ` +
+      "tests and transition to active (fails explicitly otherwise).",
   );
 });
+skill
+  .command("activate <name>")
+  .description(
+    "Activate a DRAFT skill after format + two fresh-context load tests (explicit fail).",
+  )
+  .action(async (name: string) => {
+    const r = await activateSkill(name);
+    console.log(JSON.stringify(r, null, 2));
+    if (r.activated) {
+      console.log(
+        `activated ${name}: fresh-context LOAD tests passed. ` +
+          "LLM behavioral forward-test remains NOT VERIFIED (needs a provider secret).",
+      );
+    } else {
+      console.error(`NOT activated: ${r.reason}`);
+    }
+    process.exitCode = r.activated ? 0 : 1;
+  });
 
 const provider = program
   .command("provider")

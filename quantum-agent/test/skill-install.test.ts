@@ -35,11 +35,16 @@ const successClone: Cloner = async (_repo, dest) => {
 };
 
 const emptyClone: Cloner = async (_repo, dest) => {
-  // A clone that left a partial dir but no skill — must be cleaned via failure
-  // path only when git throws; here it "succeeds" so it is treated as installed
-  // (repos may nest). We assert the failure path separately with failingClone.
+  // A clone that "succeeds" but leaves a directory with NO activatable SKILL.md.
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dest, { recursive: true });
+};
+
+const junkClone: Cloner = async (_repo, dest) => {
+  // A clone with files but no valid SKILL.md (e.g. only a README) — not a skill.
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(dest, { recursive: true });
+  writeFileSync(join(dest, "README.md"), "# not a skill\n");
 };
 
 describe("skill install — failed clone is a precise failure, never installed", () => {
@@ -79,6 +84,25 @@ describe("skill install — offline placeholder is never installed/activated", (
     const m = loadManifest(draft as string);
     expect(m).not.toBeNull();
     if (m) expect(isPlaceholder(m)).toBe(true);
+  });
+});
+
+describe("skill install — a clone with no activatable SKILL.md fails closed", () => {
+  it("empty clone (bare dir) => ok=false, not installed, dir removed", async () => {
+    const r = await install("gh:owner/empty", target, emptyClone);
+    expect(r.ok).toBe(false);
+    expect(r.installed).toEqual([]);
+    expect(r.failed).toEqual(["gh:owner/empty"]);
+    expect(r.notes.join(" ")).toMatch(/no activatable SKILL\.md/);
+    expect(existsSync(join(target, "owner-empty"))).toBe(false);
+  });
+
+  it("clone with files but no valid SKILL.md (only README) => ok=false, dir removed", async () => {
+    const r = await install("gh:owner/junk", target, junkClone);
+    expect(r.ok).toBe(false);
+    expect(r.installed).toEqual([]);
+    expect(r.failed).toEqual(["gh:owner/junk"]);
+    expect(existsSync(join(target, "owner-junk"))).toBe(false);
   });
 });
 

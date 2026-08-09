@@ -45,6 +45,18 @@
       "evidence": "test/generate.test.ts"
     },
     {
+      "id": "skill-activation",
+      "title": "skill activate: DRAFT->ACTIVE after format + 2 fresh-context (subprocess) load tests",
+      "status": "implemented",
+      "evidence": "test/skill-activation.test.ts"
+    },
+    {
+      "id": "skill-behavioral-forward-test",
+      "title": "LLM behavioral forward-test of an activated skill",
+      "status": "not_implemented",
+      "note": "fresh-context tests are deterministic load checks; a live LLM forward-test needs a provider secret (NOT_VERIFIED)"
+    },
+    {
       "id": "workflows",
       "title": "Canned workflows (issue-to-pr, pr-review-merge, bug-repro-fix, rfc-hyperplan)",
       "status": "implemented",

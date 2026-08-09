@@ -16,6 +16,14 @@ defaults:
     working-directory: quantum-agent
     shell: bash
 
+# Zero-signal gate: silence the two known, expected Node notices so the run has no
+# spurious warnings — DEP0205 (module.register) emitted by tsx, and the
+# ExperimentalWarning for the built-in node:sqlite module we use deliberately.
+# (esbuild build-script approval is handled via package.json
+# pnpm.onlyBuiltDependencies; Biome runs clean with zero info.)
+env:
+  NODE_OPTIONS: "--disable-warning=DEP0205 --disable-warning=ExperimentalWarning"
+
 jobs:
   # Required stable lane: Node 22.12+ (the supported default). Deterministic
   # frozen-lockfile install + the full green gate (lint, typecheck, test,
@@ -51,11 +59,11 @@ jobs:
       - name: Type-check (tsc)
         run: pnpm exec tsc -p tsconfig.json --noEmit
 
-      - name: Test (vitest)
-        run: pnpm exec vitest run
+      - name: Test (vitest, JSON results for the capability gate)
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile=.vitest-results.json
 
-      - name: Verify README contract
-        run: pnpm exec tsx src/cli.ts verify
+      - name: Verify README contract + capability evidence (current-run results)
+        run: pnpm exec tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results
 
   # Full compatibility lane: Node 26 on Linux. Identical suite; non-gating.
   green-node26-compat:
@@ -74,8 +82,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec biome check .
       - run: pnpm exec tsc -p tsconfig.json --noEmit
-      - run: pnpm exec vitest run
-      - run: pnpm exec tsx src/cli.ts verify
+      - run: pnpm exec vitest run --reporter=default --reporter=json --outputFile=.vitest-results.json
+      - run: pnpm exec tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results
 
   # Explicit Windows + Node 26 compatibility lane — the exact environment the
   # operator reported failures in (Windows 11 / Node 26). Non-gating (Node 26 is
@@ -98,5 +106,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec biome check .
       - run: pnpm exec tsc -p tsconfig.json --noEmit
-      - run: pnpm exec vitest run
-      - run: pnpm exec tsx src/cli.ts verify
+      - run: pnpm exec vitest run --reporter=default --reporter=json --outputFile=.vitest-results.json
+      - run: pnpm exec tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results
