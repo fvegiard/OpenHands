@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Fail if generated .agents/skills copies drift from canonical skills-core.
 
-The canonical source of truth is quantum-agent/skills-core/<name>/SKILL.md.
-`quantum skill sync` regenerates .agents/skills/<name>/SKILL.md as an in-sync
-copy with a provenance banner. This gate recomputes the expected generated
-content and fails on:
-  * a missing generated copy for a skills-core skill;
-  * a drifted/stale generated copy (content != canonical);
-  * a stale EXTRA generated copy (has the provenance banner but no source).
+The canonical source of truth is quantum-agent/skills-core/<name>/.
+`quantum skill sync` regenerates .agents/skills/<name>/ as an in-sync copy with
+a provenance banner in SKILL.md. This gate recomputes the expected generated
+content and fails on missing, drifted, or stale generated files/directories.
 
 Hand-authored .agents/skills entries (no provenance banner) are ignored.
 
@@ -49,7 +46,9 @@ def main() -> int:
     for src in sorted(core.glob('*/SKILL.md')):
         name = src.parent.name
         core_names.add(name)
-        gen = agents / name / 'SKILL.md'
+        source_dir = src.parent
+        generated_dir = agents / name
+        gen = generated_dir / 'SKILL.md'
         if not gen.exists():
             violations.append(
                 f'missing generated copy: .agents/skills/{name}/SKILL.md '
@@ -62,6 +61,33 @@ def main() -> int:
                 f'stale/drifted generated copy: .agents/skills/{name}/SKILL.md '
                 '!= canonical skills-core (run `quantum skill sync`)'
             )
+        expected_assets = {
+            path.relative_to(source_dir)
+            for path in source_dir.rglob('*')
+            if path.is_file()
+        }
+        actual_assets = {
+            path.relative_to(generated_dir)
+            for path in generated_dir.rglob('*')
+            if path.is_file()
+        }
+        for relative_path in sorted(expected_assets - actual_assets):
+            violations.append(
+                f'missing generated asset: .agents/skills/{name}/{relative_path}'
+            )
+        for relative_path in sorted(actual_assets - expected_assets):
+            violations.append(
+                f'stale extra generated asset: .agents/skills/{name}/{relative_path}'
+            )
+        for relative_path in sorted(expected_assets & actual_assets):
+            if relative_path == Path('SKILL.md'):
+                continue
+            source_bytes = (source_dir / relative_path).read_bytes()
+            generated_bytes = (generated_dir / relative_path).read_bytes()
+            if source_bytes != generated_bytes:
+                violations.append(
+                    f'drifted generated asset: .agents/skills/{name}/{relative_path}'
+                )
 
     for gen in sorted(agents.glob('*/SKILL.md')):
         name = gen.parent.name

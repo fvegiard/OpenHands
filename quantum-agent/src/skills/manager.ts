@@ -1,8 +1,8 @@
 // Skill manager — install / search / list / update / translate / pack.
 // Source-specific drivers live under sources/.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { execa } from "execa";
 import {
   discover,
@@ -232,9 +232,9 @@ export interface SyncResult {
 /**
  * Expose the canonical skills-core skills to Cursor Cloud agents through the
  * `.agents/skills` convention. `skills-core/` stays the single source of truth;
- * each `.agents/skills/<name>/SKILL.md` is a regenerated in-sync copy carrying a
- * provenance banner (not a symlink, not a hand-edited divergent duplicate).
- * Re-run after editing a source skill.
+ * each `.agents/skills/<name>` directory is a regenerated in-sync copy carrying
+ * a provenance banner in SKILL.md (not a symlink or divergent duplicate).
+ * Supporting scripts, references, assets, and agent metadata are copied too.
  */
 export function syncSkills(
   target = resolve(process.cwd(), "..", ".agents", "skills"),
@@ -245,6 +245,10 @@ export function syncSkills(
   for (const m of manifests) {
     const name = m.frontmatter.name;
     if (!name || name === "unknown") continue;
+    const source = dirname(m.path);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || basename(source) !== name) {
+      throw new Error(`unsafe or mismatched skill name: ${name}`);
+    }
     const raw = readFileSync(m.path, "utf8");
     const fmEnd = raw.indexOf("\n---", 3);
     if (fmEnd === -1) continue;
@@ -254,7 +258,8 @@ export function syncSkills(
       `\n\n> Generated from \`quantum-agent/${sourceDir.replace(/^\.\//, "")}/${name}/SKILL.md\`` +
       " by `quantum skill sync`. Edit the source, not this copy.\n";
     const dest = join(target, name);
-    mkdirSync(dest, { recursive: true });
+    rmSync(dest, { recursive: true, force: true });
+    cpSync(source, dest, { recursive: true, dereference: true });
     writeFileSync(join(dest, "SKILL.md"), head + banner + body);
     written.push(join(dest, "SKILL.md"));
   }

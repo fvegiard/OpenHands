@@ -1,0 +1,4 @@
+interface:
+  display_name: "Construction Project Evaluator"
+  short_description: "Evaluate projects from verified local evidence"
+  default_prompt: "Use $evaluate-construction-project to evaluate the Kahnawake construction project from local evidence."
