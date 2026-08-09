@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 import time
@@ -95,7 +96,7 @@ def main() -> int:
     w.append(
         'command',
         now(),
-        cmd=' '.join(cmd),
+        cmd=shlex.join([Path(cmd[0]).name, *cmd[1:]]),
         cwd='.',
         exit_code=p.returncode,
         stdout_sha256=sha256_hex(p.stdout.encode()),

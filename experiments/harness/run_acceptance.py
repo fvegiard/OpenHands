@@ -113,6 +113,21 @@ def wsl_path(path: Path) -> str:
     return resolved.as_posix()
 
 
+def portable_text(value: str) -> str:
+    home = Path.home()
+    homes = {str(home), home.as_posix(), wsl_path(home)}
+    for candidate in sorted(homes, key=len, reverse=True):
+        value = value.replace(candidate, '$USER_HOME')
+    return value
+
+
+def portable_command(argv: list[str]) -> str:
+    normalized = list(argv)
+    if normalized and Path(normalized[0]).is_absolute():
+        normalized[0] = Path(normalized[0]).name
+    return shlex.join(portable_text(arg) for arg in normalized)
+
+
 def doctor_e2e_argv(script: Path) -> list[str] | None:
     if os.name != 'nt':
         return [shutil.which('bash') or 'bash', script.as_posix()]
@@ -170,12 +185,12 @@ class Result:
         self.latency_ms = 0
 
     def bind(self, argv: list[str], cwd: Path, rc: int, out: str, err: str, ms: int):
-        self.cmd = ' '.join(argv)
+        self.cmd = portable_command(argv)
         self.cwd = str(cwd.relative_to(REPO)) if cwd != REPO else '.'
         self.exit_code = rc
         self.stdout_sha256 = sha256_hex(out)
         self.stderr_sha256 = sha256_hex(err)
-        self.stdout_excerpt = (out or err)[-600:]
+        self.stdout_excerpt = portable_text((out or err)[-600:])
         self.latency_ms = ms
 
     def to_dict(self) -> dict:
