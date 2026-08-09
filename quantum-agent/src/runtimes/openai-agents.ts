@@ -12,11 +12,12 @@ import type {
   LiveProbeResult,
   RuntimeAdapter,
   RuntimeAvailability,
+  RuntimeProfile,
   RuntimeRunInput,
   RuntimeRunResult,
   RuntimeUsage,
 } from "./adapter.ts";
-import { normalizeReply, optionalImport, presentSecret, secretValue } from "./adapter.ts";
+import { normalizeReply, optionalImport, resolveSecret } from "./adapter.ts";
 
 const PKGS = REGISTRY["openai-agents"].npmPackages; // ["@openai/agents","@openai/agents-extensions"]
 const SECRETS = REGISTRY["openai-agents"].secretEnv; // ["OPENAI_API_KEY"]
@@ -46,9 +47,19 @@ interface OpenAIClientModule {
 interface AiSdkExt {
   aisdk: (model: unknown) => unknown;
 }
+/** A Vercel AI SDK provider package: a named/default instance factory
+ * `provider(model)`, and optionally a `create<Provider>({apiKey,baseURL})`
+ * creator that returns a configured instance (lets us inject the key explicitly
+ * into THIS provider — no global env mutation). */
+type ProviderFactory = (model: string) => unknown;
+type ProviderCreator = (opts: { apiKey?: string; baseURL?: string }) => ProviderFactory;
 interface AiSdkProviderModule {
-  default?: (model: string) => unknown;
-  [named: string]: ((model: string) => unknown) | undefined;
+  default?: ProviderFactory;
+  [named: string]: ProviderFactory | ProviderCreator | undefined;
+}
+
+function capitalize(s: string): string {
+  return s.length ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
 function isAgentsSdk(m: unknown): m is OpenAIAgentsSdk {
@@ -69,22 +80,30 @@ function mapUsage(u: UsageLike | undefined): RuntimeUsage | undefined {
   };
 }
 
-function baseUrlOf(input: RuntimeRunInput, env: NodeJS.ProcessEnv): string | undefined {
-  return input.baseUrl ?? env.QUANTUM_BASE_URL ?? env.OPENAI_BASE_URL ?? undefined;
+function baseUrlOf(
+  input: RuntimeRunInput,
+  env: NodeJS.ProcessEnv,
+  profile?: RuntimeProfile,
+): string | undefined {
+  return (
+    input.baseUrl ?? profile?.baseUrl ?? env.QUANTUM_BASE_URL ?? env.OPENAI_BASE_URL ?? undefined
+  );
 }
 
 export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): RuntimeAdapter {
   const checkAvailability = async (
     env: NodeJS.ProcessEnv = process.env,
+    profile?: RuntimeProfile,
   ): Promise<RuntimeAvailability> => {
     const missingPackages: string[] = [];
     if (!isAgentsSdk(await importer(AGENTS_PKG))) missingPackages.push(AGENTS_PKG);
-    const secret = presentSecret(SECRETS, env);
-    const missingSecretNames = secret ? [] : [...SECRETS];
-    const ok = missingPackages.length === 0 && !!secret;
+    const sec = resolveSecret(SECRETS, env, profile?.secretEnv);
+    const missingSecretNames = sec.present ? [] : [...sec.names];
+    const ok = missingPackages.length === 0 && !!sec.present && !sec.invalidName;
     const parts: string[] = [];
     if (missingPackages.length) parts.push(`pnpm add ${PKGS.join(" ")}`);
-    if (!secret) parts.push(`set one of: ${SECRETS.join(", ")}`);
+    if (sec.invalidName) parts.push(`invalid secret env NAME '${sec.invalidName}'`);
+    else if (!sec.present) parts.push(`set one of: ${sec.names.join(", ")}`);
     return { ok, missingPackages, missingSecretNames, reason: ok ? "ready" : parts.join("; ") };
   };
 
@@ -94,43 +113,70 @@ export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): Ru
     );
 
   // Resolve the model to hand to Agent: a bare string for direct OpenAI, or an
-  // aisdk(providerModel) wrapper for a Vercel AI SDK provider.
+  // aisdk(providerModel) wrapper for a Vercel AI SDK provider. For an ai-sdk
+  // provider the profile's key/baseURL are injected into THAT provider (via its
+  // create<Provider> factory when available) — never into the OpenAI globals.
   const resolveModel = async (
     input: RuntimeRunInput,
     env: NodeJS.ProcessEnv,
-  ): Promise<{ model: unknown; provider: string }> => {
-    const provider = env.QUANTUM_PROVIDER;
+    profile: RuntimeProfile | undefined,
+    key: string | undefined,
+    baseUrl: string | undefined,
+  ): Promise<{ model: unknown; provider: string; aisdk: boolean }> => {
+    const provider = profile?.provider ?? env.QUANTUM_PROVIDER;
     if (provider && provider !== "openai" && provider !== "openai-compatible") {
       const ext = (await importer(EXT_PKG)) as AiSdkExt | null;
       if (!ext || typeof ext.aisdk !== "function") {
         throw new Error(`openai-agents ai-sdk path requires ${EXT_PKG} (pnpm add ${EXT_PKG}).`);
       }
-      const pkg = env.QUANTUM_AISDK_PACKAGE;
+      const pkg =
+        profile?.providerPackage ?? env.QUANTUM_PROVIDER_PACKAGE ?? env.QUANTUM_AISDK_PACKAGE;
       if (!pkg) {
         throw new Error(
-          "ai-sdk provider selected but QUANTUM_AISDK_PACKAGE is not set (e.g. @ai-sdk/google).",
+          `ai-sdk provider '${provider}' selected but no provider package set ` +
+            "(pass --provider-package or QUANTUM_PROVIDER_PACKAGE, e.g. vercel-minimax-ai-provider).",
         );
       }
       const provMod = (await importer(pkg)) as AiSdkProviderModule | null;
-      const factory = provMod?.default ?? provMod?.[provider];
-      if (typeof factory !== "function") {
-        throw new Error(
-          `ai-sdk provider package '${pkg}' has no usable model factory (pnpm add ${pkg}).`,
-        );
+      if (!provMod)
+        throw new Error(`ai-sdk provider package '${pkg}' not installed (pnpm add ${pkg}).`);
+      // Prefer a configurable creator so the key/baseURL go into THIS provider.
+      const creator = provMod[`create${capitalize(provider)}`];
+      let factory: ProviderFactory | undefined;
+      if (typeof creator === "function") {
+        factory = (creator as ProviderCreator)({ apiKey: key, baseURL: baseUrl });
+      } else {
+        const instance = provMod[provider] ?? provMod.default;
+        if (typeof instance !== "function") {
+          throw new Error(
+            `ai-sdk provider package '${pkg}' has no '${provider}' export, ` +
+              `'create${capitalize(provider)}' factory, or default (pnpm add ${pkg}).`,
+          );
+        }
+        factory = instance as ProviderFactory;
       }
       const providerModel = factory(input.model);
-      return { model: ext.aisdk(providerModel), provider: `vercel-ai-sdk:${provider}` };
+      return {
+        model: ext.aisdk(providerModel),
+        provider: `vercel-ai-sdk:${provider}`,
+        aisdk: true,
+      };
     }
-    return { model: input.model, provider: baseUrlOf(input, env) ? "openai-compatible" : "openai" };
+    return {
+      model: input.model,
+      provider: baseUrl ? "openai-compatible" : "openai",
+      aisdk: false,
+    };
   };
 
-  // Wire the named key + base URL explicitly into the SDK.
+  // Wire the profile's key + base URL explicitly into the OpenAI Agents SDK.
+  // Only used for the DIRECT OpenAI path; the ai-sdk path never touches these
+  // globals so a non-OpenAI provider key cannot leak into the OpenAI client.
   const wireCredentials = async (
     mod: OpenAIAgentsSdk,
-    env: NodeJS.ProcessEnv,
+    key: string | undefined,
     baseUrl?: string,
   ): Promise<void> => {
-    const key = secretValue(SECRETS, env);
     if (baseUrl) {
       const clientMod = (await importer("openai")) as OpenAIClientModule | null;
       if (!clientMod || typeof clientMod.default !== "function") {
@@ -148,15 +194,20 @@ export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): Ru
   const drive = async (
     input: RuntimeRunInput,
     env: NodeJS.ProcessEnv,
+    profile?: RuntimeProfile,
   ): Promise<RuntimeRunResult> => {
-    const a = await checkAvailability(env);
+    const a = await checkAvailability(env, profile);
     if (!a.ok) throw unavailable(a);
     const mod = (await importer(AGENTS_PKG)) as OpenAIAgentsSdk | null;
     if (!isAgentsSdk(mod)) throw unavailable(a);
     const t0 = Date.now();
-    const baseUrl = baseUrlOf(input, env);
-    await wireCredentials(mod, env, baseUrl);
-    const { model, provider } = await resolveModel(input, env);
+    const baseUrl = baseUrlOf(input, env, profile);
+    const sec = resolveSecret(SECRETS, env, profile?.secretEnv);
+    const { model, provider, aisdk } = await resolveModel(input, env, profile, sec.value, baseUrl);
+    // Direct OpenAI: inject the key/client into the Agents SDK. ai-sdk provider:
+    // the key is already bound to that provider (or read from its own env) — do
+    // NOT set the OpenAI default key/client (secret isolation).
+    if (!aisdk) await wireCredentials(mod, sec.value, baseUrl);
     const agent = new mod.Agent({ name: "quantum", model, instructions: INSTRUCTIONS });
     const result = await mod.run(agent, input.prompt);
     const text =
@@ -175,11 +226,11 @@ export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): Ru
 
   return {
     id: "openai-agents",
-    available: checkAvailability,
-    run: (input, env = process.env) => drive(input, env),
-    async liveProbe(env = process.env): Promise<LiveProbeResult> {
+    available: (env = process.env, profile) => checkAvailability(env, profile),
+    run: (input, env = process.env, profile) => drive(input, env, profile),
+    async liveProbe(env = process.env, profile): Promise<LiveProbeResult> {
       const model = env.QUANTUM_MODEL || REGISTRY["openai-agents"].defaultModel;
-      const a = await checkAvailability(env);
+      const a = await checkAvailability(env, profile);
       if (!a.ok) {
         return {
           status: "not_verified",
@@ -193,6 +244,7 @@ export function makeOpenAIAgentsAdapter(importer: Importer = optionalImport): Ru
       const out = await drive(
         { prompt: "Reply with exactly one word: pong", model, sessionId: `probe-${t0}` },
         env,
+        profile,
       );
       const ok = normalizeReply(out.text) === "pong";
       return {

@@ -49,7 +49,16 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   // runtime fails fast with a precise diagnostic (no silent fallback).
   const runtimeConfig = resolveRuntimeConfig();
   const adapter = getAdapter(runtimeConfig.runtime);
-  const availability = await adapter.available();
+  // The typed provider profile (NAMES/config only) drives secret/base-URL/
+  // provider-package/resume resolution inside the selected adapter.
+  const profile = {
+    provider: runtimeConfig.provider,
+    baseUrl: runtimeConfig.baseUrl,
+    secretEnv: runtimeConfig.secretEnv,
+    providerPackage: runtimeConfig.providerPackage,
+    resumeThreadId: runtimeConfig.resumeThreadId,
+  };
+  const availability = await adapter.available(process.env, profile);
   if (runtimeConfig.runtime !== "claude" && !availability.ok) {
     throw new Error(
       `Selected runtime '${runtimeConfig.runtime}' is unavailable and Quantum does not fall back: ` +
@@ -64,6 +73,8 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   // The Claude runtime uses a mock transport only when no Claude credential exists.
   const willMock = runtimeConfig.runtime === "claude" && claudeAuth?.mode === "mock";
   const model = opts.model ?? runtimeConfig.model ?? runtimeConfig.runtime;
+  // Resume: an explicit --resume wins; otherwise a persisted Codex resumeThreadId.
+  const resumeId = opts.resume ?? runtimeConfig.resumeThreadId;
   const sessionId = opts.resume ?? newSessionId();
   touchSession(sessionId);
   appendTranscript(sessionId, "user", prompt);
@@ -149,12 +160,13 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
       prompt: effectivePrompt,
       model,
       sessionId,
-      resume: opts.resume,
+      resume: resumeId,
       signal: opts.signal,
       maxBudgetUsd: opts.maxBudgetUsd,
-      baseUrl: process.env.QUANTUM_BASE_URL ?? process.env.OPENAI_BASE_URL,
+      baseUrl: runtimeConfig.baseUrl ?? process.env.QUANTUM_BASE_URL ?? process.env.OPENAI_BASE_URL,
     },
     process.env,
+    profile,
   );
   appendTranscript(sessionId, "assistant", out.text);
   reflect(sessionId, prompt.slice(0, 200), out.text);

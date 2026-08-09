@@ -78,17 +78,48 @@ exits — no silent fallback.
 
 ```bash
 quantum provider list                 # runtimes + required package/secret
-quantum provider status               # selected runtime, model, capabilities
+quantum provider status               # selected runtime, model, base-url, secret NAME, capabilities
 quantum provider select openai-agents --model gpt-5.1
 quantum provider test                 # contract test (no call)
 quantum provider test --live          # opt-in: minimal real call; NOT VERIFIED if not executed
 ```
 
-Selection precedence: `QUANTUM_RUNTIME` / `QUANTUM_PROVIDER` / `QUANTUM_MODEL`
-env vars override a persisted `provider select`, which overrides the `claude`
-default. Secret **values** come only from Cursor Secrets / environment
-variables (e.g. `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`); Quantum never stores or prints a key.
+### Typed provider profiles (easy provider/API-key switching)
+
+`provider select` persists a **typed profile** — NAMES/config only, never a key
+value. Flags: `--provider <name>`, `--model <id>`, `--base-url <url>`,
+`--secret-env <ENV_NAME>` (NAME of the env var holding the key),
+`--provider-package <pkg>` (Vercel AI SDK provider package), and
+`--resume-thread-id <id>` (Codex thread to resume):
+
+```bash
+quantum provider select openai-agents --provider openai --model gpt-5.1 --secret-env OPENAI_API_KEY
+```
+
+`--secret-env` is validated as an env var **NAME** (`[A-Za-z_][A-Za-z0-9_]*`); a
+value is rejected. The selected adapter resolves **exactly** `env[secretEnv]`,
+injects it only into that SDK, and fails explicitly if it is absent — no fallback
+and no global env mutation. When `--secret-env` is omitted the defaults apply
+(`OPENAI_API_KEY` / `CODEX_API_KEY` / Anthropic names).
+
+Example — MiniMax **M3** via the official Vercel AI SDK provider
+([`vercel-minimax-ai-provider`](https://github.com/MiniMax-AI/vercel-minimax-ai-provider),
+factory export `minimax` / `minimaxOpenAI`):
+
+```bash
+quantum provider select openai-agents --provider minimax --model MiniMax-M3 --provider-package vercel-minimax-ai-provider --secret-env MINIMAX_API_KEY
+```
+
+> The provider package officially lists MiniMax‑M2 / M2‑Stable. `MiniMax-M3` is
+> accepted as a configurable model; a **live M3 call is NOT VERIFIED** here until
+> the provider/model officially ships it — Quantum never fabricates support.
+
+Selection precedence (env overrides a persisted profile, which overrides the
+`claude` default): `QUANTUM_RUNTIME` / `QUANTUM_PROVIDER` / `QUANTUM_MODEL` /
+`QUANTUM_BASE_URL` / `QUANTUM_SECRET_ENV` / `QUANTUM_PROVIDER_PACKAGE`
+(`QUANTUM_AISDK_PACKAGE` kept for back-compat) / `QUANTUM_RESUME_THREAD_ID`.
+Secret **values** come only from Cursor Secrets / environment variables; Quantum
+never stores or prints a key (`runtime.json` holds the NAME only).
 
 ## MCP
 

@@ -11,11 +11,12 @@ import type {
   LiveProbeResult,
   RuntimeAdapter,
   RuntimeAvailability,
+  RuntimeProfile,
   RuntimeRunInput,
   RuntimeRunResult,
   RuntimeUsage,
 } from "./adapter.ts";
-import { normalizeReply, optionalImport, presentSecret, secretValue } from "./adapter.ts";
+import { normalizeReply, optionalImport, resolveSecret } from "./adapter.ts";
 
 const PKG = "@openai/codex-sdk";
 const SECRETS = REGISTRY.codex.secretEnv; // ["OPENAI_API_KEY","CODEX_API_KEY"]
@@ -52,17 +53,18 @@ function mapUsage(u: UsageLike | undefined): RuntimeUsage | undefined {
 }
 
 // Minimal env for the Codex subprocess: only the selected secret + base URL.
-function sanitizedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+// The key is exposed under the profile's exact NAME (or the defaults), never a
+// value we invent.
+function sanitizedEnv(
+  env: NodeJS.ProcessEnv,
+  secretName: string | null,
+  keyValue: string | undefined,
+  baseUrl: string | undefined,
+): Record<string, string> {
   const out: Record<string, string> = {};
   const path = env.PATH;
   if (path) out.PATH = path;
-  const key = secretValue(SECRETS, env);
-  if (key) {
-    // Expose under whichever name the caller provided (do not invent values).
-    if (env.CODEX_API_KEY) out.CODEX_API_KEY = env.CODEX_API_KEY;
-    if (env.OPENAI_API_KEY) out.OPENAI_API_KEY = env.OPENAI_API_KEY;
-  }
-  const baseUrl = env.QUANTUM_BASE_URL ?? env.OPENAI_BASE_URL;
+  if (secretName && keyValue) out[secretName] = keyValue;
   if (baseUrl) out.OPENAI_BASE_URL = baseUrl;
   return out;
 }
@@ -70,14 +72,16 @@ function sanitizedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 export function makeCodexAdapter(importer: Importer = optionalImport): RuntimeAdapter {
   const checkAvailability = async (
     env: NodeJS.ProcessEnv = process.env,
+    profile?: RuntimeProfile,
   ): Promise<RuntimeAvailability> => {
     const missingPackages = isCodexSdk(await importer(PKG)) ? [] : [PKG];
-    const secret = presentSecret(SECRETS, env);
-    const missingSecretNames = secret ? [] : [...SECRETS];
-    const ok = missingPackages.length === 0 && !!secret;
+    const sec = resolveSecret(SECRETS, env, profile?.secretEnv);
+    const missingSecretNames = sec.present ? [] : [...sec.names];
+    const ok = missingPackages.length === 0 && !!sec.present && !sec.invalidName;
     const parts: string[] = [];
     if (missingPackages.length) parts.push(`pnpm add ${PKG}`);
-    if (!secret) parts.push(`set one of: ${SECRETS.join(", ")}`);
+    if (sec.invalidName) parts.push(`invalid secret env NAME '${sec.invalidName}'`);
+    else if (!sec.present) parts.push(`set one of: ${sec.names.join(", ")}`);
     return { ok, missingPackages, missingSecretNames, reason: ok ? "ready" : parts.join("; ") };
   };
 
@@ -87,18 +91,26 @@ export function makeCodexAdapter(importer: Importer = optionalImport): RuntimeAd
   const drive = async (
     input: RuntimeRunInput,
     env: NodeJS.ProcessEnv,
+    profile?: RuntimeProfile,
   ): Promise<RuntimeRunResult> => {
-    const a = await checkAvailability(env);
+    const a = await checkAvailability(env, profile);
     if (!a.ok) throw unavailable(a);
     const mod = (await importer(PKG)) as CodexSdk | null;
     if (!isCodexSdk(mod)) throw unavailable(a);
     const t0 = Date.now();
-    const key = secretValue(SECRETS, env);
-    const baseUrl = input.baseUrl ?? env.QUANTUM_BASE_URL ?? env.OPENAI_BASE_URL;
-    const codex = new mod.Codex({ apiKey: key, baseUrl, env: sanitizedEnv(env) });
-    // Start a fresh thread or resume an existing one.
-    const thread = input.resume
-      ? codex.resumeThread(input.resume)
+    const sec = resolveSecret(SECRETS, env, profile?.secretEnv);
+    const baseUrl =
+      input.baseUrl ?? profile?.baseUrl ?? env.QUANTUM_BASE_URL ?? env.OPENAI_BASE_URL;
+    const codex = new mod.Codex({
+      apiKey: sec.value,
+      baseUrl,
+      env: sanitizedEnv(env, sec.present, sec.value, baseUrl),
+    });
+    // Start a fresh thread or resume an existing one (run --resume wins, else the
+    // profile's resumeThreadId).
+    const resumeId = input.resume ?? profile?.resumeThreadId;
+    const thread = resumeId
+      ? codex.resumeThread(resumeId)
       : codex.startThread({
           model: input.model,
           workingDirectory: env.QUANTUM_WORKDIR ?? process.cwd(),
@@ -123,11 +135,11 @@ export function makeCodexAdapter(importer: Importer = optionalImport): RuntimeAd
 
   return {
     id: "codex",
-    available: checkAvailability,
-    run: (input, env = process.env) => drive(input, env),
-    async liveProbe(env = process.env): Promise<LiveProbeResult> {
+    available: (env = process.env, profile) => checkAvailability(env, profile),
+    run: (input, env = process.env, profile) => drive(input, env, profile),
+    async liveProbe(env = process.env, profile): Promise<LiveProbeResult> {
       const model = env.QUANTUM_MODEL || REGISTRY.codex.defaultModel;
-      const a = await checkAvailability(env);
+      const a = await checkAvailability(env, profile);
       if (!a.ok) {
         return {
           status: "not_verified",
@@ -141,6 +153,7 @@ export function makeCodexAdapter(importer: Importer = optionalImport): RuntimeAd
       const out = await drive(
         { prompt: "Reply with exactly one word: pong", model, sessionId: `probe-${t0}` },
         env,
+        profile,
       );
       const ok = normalizeReply(out.text) === "pong";
       return {

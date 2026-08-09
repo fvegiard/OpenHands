@@ -13,6 +13,7 @@ import { see } from "./modal/vision.ts";
 import { transcribe } from "./modal/voice-in.ts";
 import {
   CAPABILITIES,
+  isSafeEnvName,
   persistSelection,
   providerTest,
   REGISTRY,
@@ -247,16 +248,21 @@ provider
   .description("Show the selected runtime, model, availability and capability matrix.")
   .action(async () => {
     const cfg = resolveRuntimeConfig();
-    const st = await runtimeStatus(cfg.runtime, cfg.runtime);
+    const st = await runtimeStatus(cfg.runtime, cfg.runtime, process.env, cfg.secretEnv);
     const spec = REGISTRY[cfg.runtime];
     console.log(`runtime  = ${cfg.runtime}${st.selected ? " (selected)" : ""}`);
     console.log(`provider = ${cfg.provider ?? "(default)"}`);
     console.log(`model    = ${cfg.model}`);
+    console.log(`base-url = ${cfg.baseUrl ?? "(default)"}`);
+    // Print the secret NAME only — never a value.
+    console.log(`secret-env = ${cfg.secretEnv ?? `(defaults: ${spec.secretEnv.join(", ")})`}`);
+    console.log(`provider-package = ${cfg.providerPackage ?? "(none)"}`);
+    console.log(`resume-thread-id = ${cfg.resumeThreadId ?? "(none)"}`);
     console.log(
       `installed= ${st.installed}${st.installed ? "" : ` (need: ${st.missingPackages.join(", ")})`}`,
     );
     console.log(
-      `secret   = ${st.secretPresent ? "present" : `missing (set one of: ${st.missingSecretNames.join(", ")})`}`,
+      `secret   = ${st.secretPresent ? `present (${st.secretEnvChecked.join(", ")})` : `missing (set one of: ${st.missingSecretNames.join(", ")})`}`,
     );
     console.log(`unattended-permission = ${spec.unattendedPermissionMode}`);
     console.log(`claude-coupled = ${spec.claudeCoupled}`);
@@ -265,29 +271,75 @@ provider
   });
 provider
   .command("select <runtime>")
-  .description("Persist the runtime selection (env vars still override).")
-  .option("--provider <name>", "provider backend for this runtime")
+  .description("Persist the runtime/provider profile (env vars still override).")
+  .option("--provider <name>", "provider backend (e.g. openai, minimax)")
   .option("--model <name>", "model id")
-  .action((runtime: string, opts: { provider?: string; model?: string }) => {
-    const parsed = RuntimeId.safeParse(runtime);
-    if (!parsed.success) {
-      console.error(`unknown runtime '${runtime}'. Allowed: ${RuntimeId.options.join(", ")}`);
-      process.exitCode = 2;
-      return;
-    }
-    const provErr = validateProvider(parsed.data, opts.provider);
-    if (provErr) {
-      console.error(provErr);
-      process.exitCode = 2;
-      return;
-    }
-    const file = persistSelection({
-      runtime: parsed.data,
-      provider: opts.provider,
-      model: opts.model ?? REGISTRY[parsed.data].defaultModel,
-    });
-    console.log(`selected runtime=${parsed.data}; wrote ${file}`);
-  });
+  .option("--base-url <url>", "OpenAI-compatible endpoint URL")
+  .option("--secret-env <NAME>", "env var NAME holding the key (never the value)")
+  .option(
+    "--provider-package <pkg>",
+    "Vercel AI SDK provider package (e.g. vercel-minimax-ai-provider)",
+  )
+  .option("--resume-thread-id <id>", "Codex thread id to resume")
+  .action(
+    (
+      runtime: string,
+      opts: {
+        provider?: string;
+        model?: string;
+        baseUrl?: string;
+        secretEnv?: string;
+        providerPackage?: string;
+        resumeThreadId?: string;
+      },
+    ) => {
+      const parsed = RuntimeId.safeParse(runtime);
+      if (!parsed.success) {
+        console.error(`unknown runtime '${runtime}'. Allowed: ${RuntimeId.options.join(", ")}`);
+        process.exitCode = 2;
+        return;
+      }
+      // Reject a secret VALUE masquerading as --secret-env: it must be a NAME.
+      if (opts.secretEnv !== undefined && !isSafeEnvName(opts.secretEnv)) {
+        console.error(
+          `invalid --secret-env '${opts.secretEnv}': must be an env var NAME ` +
+            "([A-Za-z_][A-Za-z0-9_]*), never a value.",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (opts.baseUrl !== undefined) {
+        try {
+          new URL(opts.baseUrl);
+        } catch {
+          console.error(`invalid --base-url '${opts.baseUrl}': must be a valid URL.`);
+          process.exitCode = 2;
+          return;
+        }
+      }
+      const provErr = validateProvider(parsed.data, opts.provider, opts.providerPackage);
+      if (provErr) {
+        console.error(provErr);
+        process.exitCode = 2;
+        return;
+      }
+      const file = persistSelection({
+        runtime: parsed.data,
+        provider: opts.provider,
+        model: opts.model ?? REGISTRY[parsed.data].defaultModel,
+        baseUrl: opts.baseUrl,
+        secretEnv: opts.secretEnv,
+        providerPackage: opts.providerPackage,
+        resumeThreadId: opts.resumeThreadId,
+      });
+      console.log(
+        `selected runtime=${parsed.data}` +
+          (opts.provider ? ` provider=${opts.provider}` : "") +
+          (opts.secretEnv ? ` secret-env=${opts.secretEnv}` : "") +
+          `; wrote ${file}`,
+      );
+    },
+  );
 provider
   .command("test")
   .description("Contract test the selected runtime (default). Use --live for a real call.")
@@ -303,7 +355,13 @@ provider
     }
     // Opt-in live probe: a minimal real call via the runtime adapter. Returns
     // NOT VERIFIED (non-zero) when it was not actually executed.
-    const probe = await getAdapter(cfg.runtime).liveProbe();
+    const probe = await getAdapter(cfg.runtime).liveProbe(process.env, {
+      provider: cfg.provider,
+      baseUrl: cfg.baseUrl,
+      secretEnv: cfg.secretEnv,
+      providerPackage: cfg.providerPackage,
+      resumeThreadId: cfg.resumeThreadId,
+    });
     const label = probe.status === "live" ? "live" : "NOT VERIFIED";
     console.log(
       `runtime=${cfg.runtime} provider=${probe.provider} model=${probe.model} kind=${label} ok=${probe.ok}` +

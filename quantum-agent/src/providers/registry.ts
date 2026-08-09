@@ -18,6 +18,20 @@ import { getPaths } from "../config.ts";
 export const RuntimeId = z.enum(["claude", "openai-agents", "codex"]);
 export type RuntimeId = z.infer<typeof RuntimeId>;
 
+/**
+ * A strict, safe environment-variable NAME (POSIX): a leading letter/underscore
+ * then letters/digits/underscores. Used for `secretEnv` so a profile can only
+ * ever reference a key by NAME — never carry a value (a real key with `-`, `.`,
+ * or spaces fails this and is rejected).
+ */
+export const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export function isSafeEnvName(name: string): boolean {
+  return SAFE_ENV_NAME.test(name);
+}
+const SafeEnvName = z
+  .string()
+  .regex(SAFE_ENV_NAME, "secretEnv must be a valid env var NAME (letters/digits/_), never a value");
+
 // Capabilities we track per runtime (see `provider status`). Per-runtime claims
 // below are DERIVED FROM the adapter wiring that the fake-SDK conformance tests
 // assert (test/adapter-conformance.test.ts) — not aspirational. Do not add a
@@ -33,11 +47,21 @@ export const CAPABILITIES = [
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
-/** Env-driven configuration, parsed at the boundary with Zod (no silent coercion). */
+/**
+ * Env-driven configuration + typed provider profile, parsed at the boundary with
+ * Zod (no silent coercion). A profile carries only NAMES/config — never a secret
+ * value: `secretEnv` is the NAME of the env var that holds the key; `baseUrl` is
+ * an OpenAI-compatible endpoint; `providerPackage` is the ai-sdk provider package;
+ * `resumeThreadId` is a Codex thread to resume.
+ */
 export const RuntimeConfigSchema = z.object({
   runtime: RuntimeId,
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+  baseUrl: z.string().url("baseUrl must be a valid URL").optional(),
+  secretEnv: SafeEnvName.optional(),
+  providerPackage: z.string().min(1).optional(),
+  resumeThreadId: z.string().min(1).optional(),
 });
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 
@@ -137,22 +161,29 @@ async function isImportable(pkg: string): Promise<boolean> {
   }
 }
 
-/** Which of a runtime's accepted secret env vars are set (names only). */
+/**
+ * Which of a runtime's accepted secret env vars are set (names only). When an
+ * explicit profile `secretEnv` is given, ONLY that exact name is considered (no
+ * fallback to the runtime defaults) so status reflects the selected profile.
+ */
 function presentSecrets(
   spec: RuntimeSpec,
   env: NodeJS.ProcessEnv,
-): { present: string[]; missing: string[] } {
-  const present = spec.secretEnv.filter((name) => {
+  secretEnv?: string,
+): { checked: string[]; present: string[]; missing: string[] } {
+  const names = secretEnv ? [secretEnv] : [...spec.secretEnv];
+  const present = names.filter((name) => {
     const v = env[name];
     return typeof v === "string" && v.length > 0;
   });
-  return { present: [...present], missing: present.length > 0 ? [] : [...spec.secretEnv] };
+  return { checked: names, present: [...present], missing: present.length > 0 ? [] : [...names] };
 }
 
 export async function runtimeStatus(
   id: RuntimeId,
   selectedId: RuntimeId,
   env: NodeJS.ProcessEnv = process.env,
+  secretEnv?: string,
 ): Promise<RuntimeStatus> {
   const spec = REGISTRY[id];
   const missingPackages: string[] = [];
@@ -160,7 +191,7 @@ export async function runtimeStatus(
     if (!(await isImportable(pkg))) missingPackages.push(pkg);
   }
   const installed = missingPackages.length === 0;
-  const { present, missing } = presentSecrets(spec, env);
+  const { checked, present, missing } = presentSecrets(spec, env, secretEnv);
   const secretPresent = present.length > 0;
   const ready = installed && secretPresent;
   const model = env.QUANTUM_MODEL ?? spec.defaultModel;
@@ -169,9 +200,9 @@ export async function runtimeStatus(
   if (!installed) {
     diagnostic =
       `install: pnpm add ${missingPackages.join(" ")}` +
-      (secretPresent ? "" : `  then set one of: ${spec.secretEnv.join(", ")}`);
+      (secretPresent ? "" : `  then set one of: ${checked.join(", ")}`);
   } else if (!secretPresent) {
-    diagnostic = `set one of these Cursor Secrets: ${spec.secretEnv.join(", ")} (live calls only)`;
+    diagnostic = `set one of these Cursor Secrets: ${checked.join(", ")} (live calls only)`;
   } else {
     diagnostic = "ready (package installed, secret present)";
   }
@@ -183,7 +214,7 @@ export async function runtimeStatus(
     installed,
     missingPackages,
     secretPresent,
-    secretEnvChecked: spec.secretEnv,
+    secretEnvChecked: checked,
     missingSecretNames: missing,
     ready,
     model,
@@ -227,7 +258,22 @@ export function resolveRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runt
   const runtime = parsedId.data;
   const provider = env.QUANTUM_PROVIDER || persisted.provider;
   const model = env.QUANTUM_MODEL || persisted.model || REGISTRY[runtime].defaultModel;
-  return RuntimeConfigSchema.parse({ runtime, provider, model });
+  // Profile fields — env overrides a persisted `provider select`. NAMES/config
+  // only; values are never read here (QUANTUM_AISDK_PACKAGE kept for back-compat).
+  const baseUrl = env.QUANTUM_BASE_URL || persisted.baseUrl;
+  const secretEnv = env.QUANTUM_SECRET_ENV || persisted.secretEnv;
+  const providerPackage =
+    env.QUANTUM_PROVIDER_PACKAGE || env.QUANTUM_AISDK_PACKAGE || persisted.providerPackage;
+  const resumeThreadId = env.QUANTUM_RESUME_THREAD_ID || persisted.resumeThreadId;
+  return RuntimeConfigSchema.parse({
+    runtime,
+    provider,
+    model,
+    baseUrl,
+    secretEnv,
+    providerPackage,
+    resumeThreadId,
+  });
 }
 
 export function persistSelection(config: RuntimeConfig): string {
@@ -237,17 +283,35 @@ export function persistSelection(config: RuntimeConfig): string {
   return file;
 }
 
-/** Validate a provider name against the selected runtime's supported backends. */
-export function validateProvider(runtime: RuntimeId, provider: string | undefined): string | null {
+/**
+ * Validate a provider name against the selected runtime's backends.
+ *
+ * `openai-agents` is intentionally open-ended: besides direct OpenAI it can drive
+ * ANY Vercel AI SDK provider (google, minimax, …). Such a provider is allowed
+ * only when a `providerPackage` is supplied (e.g. `vercel-minimax-ai-provider`),
+ * so selection still fails closed with a precise hint instead of silently doing
+ * nothing. `claude` and `codex` keep their fixed backend lists.
+ */
+export function validateProvider(
+  runtime: RuntimeId,
+  provider: string | undefined,
+  providerPackage?: string,
+): string | null {
   if (!provider) return null;
   const spec = REGISTRY[runtime];
-  if (!spec.providers.includes(provider)) {
+  if (spec.providers.includes(provider)) return null;
+  if (runtime === "openai-agents") {
+    if (provider === "openai" || provider === "openai-compatible") return null;
+    if (providerPackage) return null;
     return (
-      `provider '${provider}' is not supported by runtime '${runtime}'. ` +
-      `Supported: ${spec.providers.join(", ")}`
+      `provider '${provider}' needs a Vercel AI SDK package: pass ` +
+      "--provider-package <pkg> (e.g. vercel-minimax-ai-provider for MiniMax)."
     );
   }
-  return null;
+  return (
+    `provider '${provider}' is not supported by runtime '${runtime}'. ` +
+    `Supported: ${spec.providers.join(", ")}`
+  );
 }
 
 export interface ProviderTestResult {
@@ -268,8 +332,8 @@ export async function providerTest(
   config: RuntimeConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProviderTestResult> {
-  const status = await runtimeStatus(config.runtime, config.runtime, env);
-  const providerErr = validateProvider(config.runtime, config.provider);
+  const status = await runtimeStatus(config.runtime, config.runtime, env, config.secretEnv);
+  const providerErr = validateProvider(config.runtime, config.provider, config.providerPackage);
   if (providerErr) {
     return {
       ok: false,
