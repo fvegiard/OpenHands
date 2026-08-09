@@ -1,0 +1,18 @@
+{
+  "name": "OpenHands Autonomous",
+  "snapshot": "snapshot-20260809-72de92ca-0807-476c-9f83-11f8c288aee9",
+  "agentCanUpdateSnapshot": true,
+  "install": "$HOME/.local/bin/poetry install --with dev,test,runtime\nnpm --prefix frontend install\nnpx --yes pnpm@10.18.2 --dir quantum-agent install --frozen-lockfile",
+  "start": "INSTALL_DOCKER=0 RUNTIME=local scripts/openhands-cloud start",
+  "ports": [
+    {
+      "name": "Backend",
+      "port": 3000
+    },
+    {
+      "name": "Frontend",
+      "port": 12000
+    }
+  ],
+  "terminals": []
+}
