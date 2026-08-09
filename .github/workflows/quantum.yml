@@ -16,16 +16,6 @@ defaults:
     working-directory: quantum-agent
     shell: bash
 
-# Zero-signal gate: silence the two known, expected Node notices so the run has no
-# spurious warnings — DEP0205 (module.register) emitted by tsx, and the
-# ExperimentalWarning for the built-in node:sqlite module we use deliberately.
-# (esbuild build-script approval is handled via package.json
-# pnpm.onlyBuiltDependencies; Biome runs clean with zero info.)
-env:
-  # DEP0205: tsx module.register; DEP0190: pnpm/action-setup child_process on
-  # Node 26; ExperimentalWarning: the built-in node:sqlite we use deliberately.
-  NODE_OPTIONS: "--disable-warning=DEP0205 --disable-warning=DEP0190 --disable-warning=ExperimentalWarning"
-
 jobs:
   # Required stable lane: Node 22.12+ (the supported default). Deterministic
   # frozen-lockfile install + the full green gate (lint, typecheck, test,
@@ -67,10 +57,8 @@ jobs:
       - name: Verify README contract + capability evidence (current-run results)
         run: pnpm exec tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results
 
-  # Full compatibility lane: Node 26 on Linux. Identical suite; non-gating.
   green-node26-compat:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -87,14 +75,8 @@ jobs:
       - run: pnpm exec vitest run --reporter=default --reporter=json --outputFile=.vitest-results.json
       - run: pnpm exec tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results
 
-  # Explicit Windows + Node 26 compatibility lane — the exact environment the
-  # operator reported failures in (Windows 11 / Node 26). Non-gating (Node 26 is
-  # not the supported default), but it validates the cross-platform path fixes
-  # (permissions/sources) and the git-clone no-prompt fix. biome runs in check
-  # mode only (never --write) so CI is non-mutating.
   green-windows-node26-compat:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
