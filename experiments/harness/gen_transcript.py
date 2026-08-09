@@ -84,7 +84,7 @@ def main() -> int:
     # not PASS). Record the aggregate run as a replayable command event too.
     results_path = lane_dir / f'results-{args.lane}.json'
     cmd = [
-        'python3',
+        sys.executable,
         'experiments/harness/run_acceptance.py',
         '--lane',
         args.lane,

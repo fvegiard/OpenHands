@@ -33,8 +33,11 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -43,6 +46,8 @@ REPO = Path(__file__).resolve().parents[2]
 QA = REPO / 'quantum-agent'
 SKILLS = REPO / '.agents' / 'skills'
 LIVE_SECRETS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']
+_HARNESS_TEMP = tempfile.TemporaryDirectory(prefix='openhands-harness-')
+HARNESS_TEMP = Path(_HARNESS_TEMP.name)
 
 # Evidence policy — IDENTICAL across all lanes (part of the shared harness).
 #   real:     a runnable command whose exit/output is scored (benchmark).
@@ -95,8 +100,50 @@ def sh(
 
 def quantum_argv(sub: list[str]) -> list[str]:
     # Prefer a pnpm already on PATH (CI installs it); fall back to corepack.
-    base = ['pnpm'] if shutil.which('pnpm') else ['corepack', 'pnpm']
+    pnpm = shutil.which('pnpm')
+    corepack = shutil.which('corepack')
+    base = [pnpm] if pnpm else [corepack or 'corepack', 'pnpm']
     return [*base, 'quantum', *sub]
+
+
+def wsl_path(path: Path) -> str:
+    resolved = path.resolve()
+    if os.name == 'nt' and len(resolved.drive) == 2:
+        return f'/mnt/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}'
+    return resolved.as_posix()
+
+
+def doctor_e2e_argv(script: Path) -> list[str] | None:
+    if os.name != 'nt':
+        return [shutil.which('bash') or 'bash', script.as_posix()]
+
+    # Git for Windows lacks the POSIX process-group primitives managed by this
+    # Linux control surface. Exercise the real contract through installed WSL.
+    wsl = shutil.which('wsl.exe')
+    if wsl is None:
+        return None
+
+    dot_git = REPO / '.git'
+    git_dir = dot_git
+    if dot_git.is_file():
+        marker = 'gitdir:'
+        value = dot_git.read_text(encoding='utf-8').strip()
+        if not value.lower().startswith(marker):
+            return None
+        git_dir = Path(value[len(marker) :].strip())
+        if not git_dir.is_absolute():
+            git_dir = (REPO / git_dir).resolve()
+
+    repo = shlex.quote(wsl_path(REPO))
+    git_dir_arg = shlex.quote(wsl_path(git_dir))
+    command = (
+        'set -euo pipefail; '
+        f'export GIT_DIR={git_dir_arg}; '
+        f'export GIT_WORK_TREE={repo}; '
+        f'cd {repo}; '
+        'bash scripts/test-openhands-cloud.sh'
+    )
+    return [wsl, '--exec', 'bash', '-lc', command]
 
 
 def has_quantum() -> bool:
@@ -259,7 +306,10 @@ def probe_real(tid: str) -> Result:  # noqa: C901 — explicit per-item mapping
             quantum_argv(['provider', 'status']),
             QA,
             re.compile(r'codex', re.I),
-            env={'QUANTUM_RUNTIME': 'codex', 'QUANTUM_HOME': '/tmp/exp-harness-qh'},
+            env={
+                'QUANTUM_RUNTIME': 'codex',
+                'QUANTUM_HOME': str(HARNESS_TEMP / 'provider-switch'),
+            },
         )
     if tid == 't06-invalid-runtime-errors':
         if not q:
@@ -272,13 +322,13 @@ def probe_real(tid: str) -> Result:  # noqa: C901 — explicit per-item mapping
             expect_nonzero=True,
             env={
                 'QUANTUM_RUNTIME': 'gemini-bogus',
-                'QUANTUM_HOME': '/tmp/exp-harness-qh2',
+                'QUANTUM_HOME': str(HARNESS_TEMP / 'invalid-runtime'),
             },
         )
     if tid == 't07-skill-validate':
         return real_probe(
             tid,
-            ['python3', 'experiments/harness/skill_lint.py'],
+            [sys.executable, 'experiments/harness/skill_lint.py'],
             REPO,
             re.compile(r'OK \(\d+ skills valid\)'),
         )
@@ -290,7 +340,17 @@ def probe_real(tid: str) -> Result:  # noqa: C901 — explicit per-item mapping
         script = REPO / 'scripts' / 'test-openhands-cloud.sh'
         if not script.exists():
             return _missing(tid, 'no doctor E2E')
-        return real_probe(tid, ['bash', str(script)], REPO, re.compile(r'ALL PASS'))
+        argv = doctor_e2e_argv(script)
+        if argv is None:
+            return _missing(
+                tid, 'Windows doctor E2E requires an installed WSL distribution'
+            )
+        return real_probe(
+            tid,
+            argv,
+            REPO,
+            re.compile(r'ALL PASS'),
+        )
     return _missing(tid, 'no real probe')
 
 
@@ -394,7 +454,9 @@ def main() -> int:
             f'  {r["status"]:12}{mark} {r["id"]:30} {r["evidence"]:8} {r["latency_ms"]:6}ms  {r["note"]}'
         )
     if args.out:
-        Path(args.out).write_text(json.dumps(out, indent=2) + '\n')
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(out, indent=2) + '\n')
         print(f'\nwrote {args.out}')
 
     # Fail-closed: a critical real item that is not PASS makes the harness fail.
