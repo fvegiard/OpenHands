@@ -58,6 +58,14 @@ function emptyResult(): InstallResult {
   return { installed: [], skipped: [], placeholders: [], failed: [], notes: [], ok: true };
 }
 
+function removeInstallDirectory(dest: string): void {
+  rmSync(dest, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** A git cloner — injectable so install tests are hermetic (no real network). */
 export type Cloner = (repo: string, dest: string) => Promise<void>;
 
@@ -107,7 +115,10 @@ async function installGh(spec: string, target: string, cloner: Cloner): Promise<
   const repo = spec.slice(3);
   const dest = join(target, repo.replace(/[^a-z0-9._-]/gi, "-"));
   if (existsSync(dest)) {
-    return { ...emptyResult(), skipped: [dest], notes: [`already installed: ${dest}`] };
+    if (activatableSkills(dest).length > 0) {
+      return { ...emptyResult(), skipped: [dest], notes: [`already installed: ${dest}`] };
+    }
+    removeInstallDirectory(dest);
   }
   // Offline mode: never touch the network AND never claim success. The draft is
   // reported as a placeholder (NOT_VERIFIED), not under installed[].
@@ -127,11 +138,7 @@ async function installGh(spec: string, target: string, cloner: Cloner): Promise<
     // usable name (not a placeholder, not "unknown").
     const found = activatableSkills(dest);
     if (found.length === 0) {
-      try {
-        rmSync(dest, { recursive: true, force: true });
-      } catch {
-        /* best-effort cleanup */
-      }
+      removeInstallDirectory(dest);
       return {
         ...emptyResult(),
         failed: [spec],
@@ -144,20 +151,16 @@ async function installGh(spec: string, target: string, cloner: Cloner): Promise<
       installed: [dest],
       notes: [`installed ${repo} (${found.length} activatable skill(s))`],
     };
-  } catch (err) {
+  } catch (error) {
     // Clone genuinely failed (unavailable / private / bad repo). Remove any
     // partial directory and report a precise, nonzero failure. NEVER write a
     // placeholder into installed[] — that would be a fabricated success.
-    try {
-      rmSync(dest, { recursive: true, force: true });
-    } catch {
-      /* best-effort cleanup */
-    }
+    removeInstallDirectory(dest);
     return {
       ...emptyResult(),
       failed: [spec],
       ok: false,
-      notes: [`git clone failed for ${repo}: ${(err as Error).message}`],
+      notes: [`git clone failed for ${repo}: ${errorMessage(error)}`],
     };
   }
 }

@@ -4,7 +4,7 @@
 // installed; an offline install writes a NOT_VERIFIED placeholder that is never
 // discovered/activated.
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -103,6 +103,19 @@ describe("skill install — a clone with no activatable SKILL.md fails closed", 
     expect(r.installed).toEqual([]);
     expect(r.failed).toEqual(["gh:owner/junk"]);
     expect(existsSync(join(target, "owner-junk"))).toBe(false);
+  });
+
+  it("removes a stale partial clone and retries the install", async () => {
+    const stale = join(target, "owner-retry");
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(stale, "README.md"), "# interrupted clone\n");
+
+    const r = await install("gh:owner/retry", target, successClone);
+
+    expect(r.ok).toBe(true);
+    expect(r.installed).toEqual([stale]);
+    expect(existsSync(join(stale, "SKILL.md"))).toBe(true);
+    expect(existsSync(join(stale, "README.md"))).toBe(false);
   });
 });
 
