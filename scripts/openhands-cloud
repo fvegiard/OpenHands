@@ -165,13 +165,24 @@ proc_alive() {
   esac
 }
 
+# A fresh, unguessable per-launch nonce. Bound to the child via its environment
+# (OHC_OWNER_NONCE) and recorded in protected state; ownership requires BOTH.
+gen_nonce() {
+  head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' 2>/dev/null || echo "$RANDOM-$RANDOM-$RANDOM-$$"
+}
+
+# Record ownership for a launched leader. The nonce MUST be the same value that
+# was injected into the child's environment at launch, so a forged state file
+# (foreign PID/PGID/start/repo/nonce) cannot pass verify_owned: the real process
+# will not carry our OHC_OWNER_NONCE.
 write_state() {
   local leader pgid nonce start
   leader="$1"
+  nonce="${2:?write_state requires a nonce bound to the child}"
   pgid="$(pgid_of "$leader")"
   start="$(proc_starttime "$leader")"
-  nonce="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' 2>/dev/null || echo "$RANDOM-$RANDOM-$RANDOM")"
   mkdir -p "$RUNTIME_DIR"
+  chmod 700 "$RUNTIME_DIR" 2>/dev/null || true
   OHC_L="$leader" OHC_G="$pgid" OHC_N="$nonce" OHC_S="$start" OHC_R="$REPO_ROOT" OHC_F="$STATE_FILE" \
     python3 -c '
 import json, os, time
@@ -188,6 +199,25 @@ json.dump(
     indent=2,
 )
 '
+  chmod 600 "$STATE_FILE" 2>/dev/null || true
+}
+
+# Does the LIVE process $1 actually carry our launch nonce in its environment?
+# This binds ownership to the child that we started. Return codes:
+#   0  environ readable AND contains OHC_OWNER_NONCE=<nonce>  (definitely ours)
+#   1  environ readable but nonce absent                      (foreign/forged)
+#   2  /proc exists but environ unreadable (other-uid proc)   (cannot confirm)
+#   3  no /proc mechanism (non-Linux)                         (cannot bind here)
+proc_has_nonce() {
+  local pid="$1" nonce="$2"
+  if [ -r "/proc/$pid/environ" ]; then
+    if tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -qx "OHC_OWNER_NONCE=$nonce"; then
+      return 0
+    fi
+    return 1
+  fi
+  [ -d /proc ] && return 2
+  return 3
 }
 
 _state_field() {
@@ -230,6 +260,23 @@ verify_owned() {
     log "ownership: state repo ($repo) != $REPO_ROOT — refusing"
     return 1
   fi
+  # Strongest check: the live process must actually carry our launch nonce in its
+  # environment. This defeats a forged state file that points at a foreign PID —
+  # even if every recorded field (pid/pgid/start/repo/nonce) is guessed, the real
+  # process will not have OHC_OWNER_NONCE=<nonce> unless WE launched it.
+  proc_has_nonce "$leader" "$nonce"
+  case $? in
+    0) ;; # bound to our child — proceed
+    3)
+      # No /proc (non-Linux): cannot bind to the child here. Fall back to the
+      # start-time+pgid+repo identity already verified above (best-effort).
+      log "ownership: /proc unavailable; using start-time/pgid identity (no nonce binding)"
+      ;;
+    *)
+      log "ownership: pid $leader does not carry our launch nonce — forged/foreign state, refusing"
+      return 1
+      ;;
+  esac
   echo "$pgid"
 }
 
@@ -400,13 +447,16 @@ cmd_start() {
     return 1
   }
 
-  # Launch in a NEW session/process group; record durable ownership metadata.
-  setsid bash -c "cd '$REPO_ROOT' && exec make run \
+  # Launch in a NEW session/process group; bind a fresh nonce to the child via
+  # its environment and record durable, protected ownership metadata.
+  local nonce
+  nonce="$(gen_nonce)"
+  setsid env OHC_OWNER_NONCE="$nonce" bash -c "cd '$REPO_ROOT' && exec make run \
       BACKEND_HOST=0.0.0.0 BACKEND_PORT='$BACKEND_PORT' \
       FRONTEND_HOST=0.0.0.0 FRONTEND_PORT='$FRONTEND_PORT'" \
     >>"$LOG" 2>&1 </dev/null &
   local leader=$!
-  write_state "$leader"
+  write_state "$leader" "$nonce"
 
   log "waiting for backend on :$BACKEND_PORT (max 90s)"
   local i
@@ -417,10 +467,12 @@ cmd_start() {
     }
     sleep 1
   done
-  [ "$(http_code "$BACKEND/alive")" = "200" ] || {
-    c_red "backend did not become healthy"
+  if [ "$(http_code "$BACKEND/alive")" != "200" ]; then
+    c_red "backend did not become healthy — reaping the owned process group"
+    cmd_stop >/dev/null 2>&1 || true # reaps only OUR group and clears state
     return 1
-  }
+  fi
+
   for i in $(seq 1 30); do
     [ "$(http_code "$FRONTEND/")" = "200" ] && {
       c_green "frontend: up"
@@ -428,6 +480,13 @@ cmd_start() {
     }
     sleep 1
   done
+  # Final nonzero guard: a backend-only start is not a successful start.
+  if [ "$(http_code "$FRONTEND/")" != "200" ]; then
+    c_red "frontend did not become healthy — reaping the owned process group"
+    cmd_stop >/dev/null 2>&1 || true
+    return 1
+  fi
+  c_green "start: OK (backend + frontend healthy)"
 }
 
 cmd_status() {

@@ -96,11 +96,13 @@ else
 fi
 
 echo "== test: stop terminates+reaps OUR group and preserves a foreign process =="
-# Owned group: a setsid sleep (its own group leader); record durable state.
-setsid bash -c 'sleep 60' &
+# Owned group: a setsid sleep carrying our launch nonce in its environment (so
+# the nonce-binding ownership check confirms it is genuinely ours).
+OWNED_NONCE="owned-nonce-$$-$RANDOM"
+setsid env OHC_OWNER_NONCE="$OWNED_NONCE" bash -c 'sleep 60' &
 OWNED=$!
 sleep 0.3
-write_state "$OWNED"
+write_state "$OWNED" "$OWNED_NONCE"
 # A separate foreign sleep that must survive stop.
 sleep 60 &
 FOREIGN2=$!
@@ -135,6 +137,36 @@ else
   fail "stop killed a process on a stale/reused-PID state"
 fi
 kill "$INNOCENT" 2>/dev/null || true
+
+echo "== test: stop REFUSES a FORGED state bound to a foreign PID (nonce not in env) =="
+# Strongest forgery: every recorded field is CONSISTENT with a live foreign
+# process (pid/pgid/start/repo) and the nonce is attacker-chosen — but that
+# process was NOT launched by us, so its environment lacks OHC_OWNER_NONCE.
+# Ownership must refuse and the innocent process must survive. (Linux /proc.)
+if [ -r "/proc/$$/environ" ]; then
+  sleep 60 &
+  VICTIM=$!
+  sleep 0.3
+  OHC_L="$VICTIM" OHC_G="$(pgid_of "$VICTIM")" OHC_N="attacker-guessed-nonce" \
+    OHC_S="$(proc_starttime "$VICTIM")" OHC_R="$REPO_ROOT" \
+    OHC_F="$OHC_RUNTIME_DIR/app.state.json" python3 -c '
+import json, os
+os.makedirs(os.path.dirname(os.environ["OHC_F"]), exist_ok=True)
+json.dump({"leader_pid":os.environ["OHC_L"],"pgid":os.environ["OHC_G"],
+           "nonce":os.environ["OHC_N"],"leader_starttime":os.environ["OHC_S"],
+           "repo":os.environ["OHC_R"],"created_at":"x"}, open(os.environ["OHC_F"],"w"))
+'
+  cmd_stop >/dev/null 2>&1 || true
+  sleep 0.3
+  if proc_alive "$VICTIM"; then
+    pass "forged state (foreign PID without our nonce) refused; victim alive"
+  else
+    fail "forged state killed a foreign process (ownership not bound to the child)"
+  fi
+  kill "$VICTIM" 2>/dev/null || true
+else
+  pass "skipped forged-state test: /proc environ not readable on this platform"
+fi
 
 echo "== test: pnpm resolves from PATH without Corepack (Node26 no-corepack) =="
 mkdir -p "$TMP/fakebin"

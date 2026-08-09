@@ -26,7 +26,11 @@ jobs:
   integrity:
     runs-on: ubuntu-latest
     steps:
+      # Check out the BRANCH HEAD, not the synthetic PR merge ref, so lane
+      # identity (head_sha) is exact on pull_request as well as push.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Contract lock integrity (frozen bundle unchanged)
         run: |
@@ -49,6 +53,9 @@ jobs:
       - name: Red fixtures (validator rejects false confidence)
         run: python3 experiments/harness/test_transcript_gate.py
 
+      - name: Red fixtures (comparator rejects unproven/ fabricated results)
+        run: python3 experiments/harness/test_compare_lanes.py
+
       - name: Skill format lint (real command)
         run: python3 experiments/harness/skill_lint.py
 
@@ -70,7 +77,11 @@ jobs:
   regen-and-validate-head:
     runs-on: ubuntu-latest
     steps:
+      # Exact-head checkout: on pull_request use the PR branch head SHA (never the
+      # synthetic merge ref) so `git rev-parse HEAD` == the real lane head.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -97,5 +108,5 @@ jobs:
           python3 experiments/harness/validate_transcript.py \
             --require-lane synthesis --require-head "$HEAD_SHA" --require-pass
 
-      - name: Superiority gate (NOT_VERIFIED unless a lane is provably superior)
-        run: python3 experiments/harness/compare_lanes.py
+      - name: "Superiority gate (enforce mode: fail on unproven superiority)"
+        run: python3 experiments/harness/compare_lanes.py --enforce
