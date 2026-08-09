@@ -1,7 +1,7 @@
 // Skill manager — install / search / list / update / translate / pack.
 // Source-specific drivers live under sources/.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execa } from "execa";
 import { discover, loadBody, type SkillBody, type SkillManifest } from "./loader.ts";
@@ -34,17 +34,47 @@ function ensureDir(dir: string): void {
 }
 
 export interface InstallResult {
+  /** Real, activatable skills only (a placeholder is NEVER listed here). */
   installed: string[];
+  /** Already-present or intentionally-not-installed specs. */
   skipped: string[];
+  /** Offline drafts written under `.drafts/` — NOT_VERIFIED, never active. */
+  placeholders: string[];
+  /** Specs whose clone genuinely failed (precise reason in notes). */
+  failed: string[];
   notes: string[];
+  /** False when any spec failed to install (drives a nonzero CLI exit). */
+  ok: boolean;
 }
 
-function writeOfflinePlaceholder(repo: string, dest: string): void {
+function emptyResult(): InstallResult {
+  return { installed: [], skipped: [], placeholders: [], failed: [], notes: [], ok: true };
+}
+
+/** A git cloner — injectable so install tests are hermetic (no real network). */
+export type Cloner = (repo: string, dest: string) => Promise<void>;
+
+const realClone: Cloner = async (repo, dest) => {
+  await execa("git", ["clone", "--depth", "1", `https://github.com/${repo}.git`, dest], {
+    timeout: 120_000,
+    // Never block on a credential prompt: a private/missing repo otherwise hangs
+    // until timeout (Git Credential Manager). With prompts disabled git fails
+    // fast and we report a precise failure (never a fake placeholder-as-installed).
+    env: { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", GCM_INTERACTIVE: "never" },
+  });
+};
+
+/** Write an OFFLINE placeholder under `.drafts/` (dot-dir => never discovered).
+ * Marked `status: placeholder` so it can never be treated as an active skill. */
+function writeOfflinePlaceholder(repo: string, target: string): string {
+  const dest = join(target, ".drafts", repo.replace(/[^a-z0-9._-]/gi, "-"));
   ensureDir(dest);
   writeFileSync(
     join(dest, "SKILL.md"),
-    `---\nname: ${repo.replace(/.*\//, "")}\ndescription: placeholder for ${repo} (offline install)\n---\n# ${repo}\n\nRe-run \`quantum skill install gh:${repo}\` when network is available.\n`,
+    `---\nname: ${repo.replace(/.*\//, "")}\nstatus: placeholder\ndescription: NOT_VERIFIED offline placeholder for ${repo}\n---\n# ${repo}\n\n` +
+      `This is a placeholder, not an installed skill. Re-run \`quantum skill install gh:${repo}\` with network access.\n`,
   );
+  return dest;
 }
 
 /** Skip the network clone (hermetic/deterministic) when explicitly requested. */
@@ -53,40 +83,61 @@ function offlineSkills(): boolean {
   return v === "1" || v === "true";
 }
 
-async function installGh(spec: string, target: string): Promise<InstallResult> {
+async function installGh(spec: string, target: string, cloner: Cloner): Promise<InstallResult> {
   const repo = spec.slice(3);
   const dest = join(target, repo.replace(/[^a-z0-9._-]/gi, "-"));
   if (existsSync(dest)) {
-    return { installed: [], skipped: [dest], notes: [`already installed: ${dest}`] };
+    return { ...emptyResult(), skipped: [dest], notes: [`already installed: ${dest}`] };
   }
-  // Offline mode: never touch the network. Keeps unit tests deterministic and
-  // fast (no live git clone) on every platform, including Windows where a slow
-  // clone otherwise blows the test timeout.
+  // Offline mode: never touch the network AND never claim success. The draft is
+  // reported as a placeholder (NOT_VERIFIED), not under installed[].
   if (offlineSkills()) {
-    writeOfflinePlaceholder(repo, dest);
-    return { installed: [dest], skipped: [], notes: [`offline mode: wrote placeholder for ${repo}`] };
+    const draft = writeOfflinePlaceholder(repo, target);
+    return {
+      ...emptyResult(),
+      placeholders: [draft],
+      notes: [`offline: NOT_VERIFIED placeholder for ${repo} (not installed, not active)`],
+    };
   }
   try {
-    await execa("git", ["clone", "--depth", "1", `https://github.com/${repo}.git`, dest], {
-      timeout: 120_000,
-      // Never block on a credential prompt: without this, a private/missing
-      // repo makes `git clone` hang until the timeout on Windows (Git Credential
-      // Manager pops an interactive prompt). With prompts disabled git fails fast
-      // and we write the offline placeholder.
-      env: { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", GCM_INTERACTIVE: "never" },
-    });
-    return { installed: [dest], skipped: [], notes: [] };
+    await cloner(repo, dest);
+    // A clone that produced no SKILL.md is not a real skill — treat as failure.
+    if (!existsSync(join(dest, "SKILL.md")) && discover([dest]).length === 0) {
+      // Some repos nest skills; only fail if nothing skill-like landed.
+      const anyMd = existsSync(dest);
+      if (!anyMd) {
+        return { ...emptyResult(), failed: [spec], ok: false, notes: [`clone produced nothing for ${repo}`] };
+      }
+    }
+    return { ...emptyResult(), installed: [dest], notes: [`installed ${repo}`] };
   } catch (err) {
-    writeOfflinePlaceholder(repo, dest);
+    // Clone genuinely failed (unavailable / private / bad repo). Remove any
+    // partial directory and report a precise, nonzero failure. NEVER write a
+    // placeholder into installed[] — that would be a fabricated success.
+    try {
+      rmSync(dest, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
     return {
-      installed: [dest],
-      skipped: [],
-      notes: [`git clone failed (${(err as Error).message}); wrote offline placeholder`],
+      ...emptyResult(),
+      failed: [spec],
+      ok: false,
+      notes: [`git clone failed for ${repo}: ${(err as Error).message}`],
     };
   }
 }
 
-async function installPack(name: string, target: string): Promise<InstallResult> {
+function mergeResults(target: InstallResult, r: InstallResult): void {
+  target.installed.push(...r.installed);
+  target.skipped.push(...r.skipped);
+  target.placeholders.push(...r.placeholders);
+  target.failed.push(...r.failed);
+  target.notes.push(...r.notes);
+  if (!r.ok) target.ok = false;
+}
+
+async function installPack(name: string, target: string, cloner: Cloner): Promise<InstallResult> {
   const { sources, packs: tomlPacks } = parseSourcesFile();
   const externalPacks: Pack[] = [...tomlPacks];
   for (const s of sources) {
@@ -97,42 +148,39 @@ async function installPack(name: string, target: string): Promise<InstallResult>
   }
   const pack = findPack(name, externalPacks);
   if (!pack) {
-    return { installed: [], skipped: [name], notes: [`unknown pack: ${name}`] };
+    return { ...emptyResult(), skipped: [name], ok: false, notes: [`unknown pack: ${name}`] };
   }
   // A pack spec can either be a concrete install spec (gh:.. / pack:..) or
   // a reference to another pack name. Resolve up to one indirection level.
-  const installed: string[] = [];
-  const skipped: string[] = [];
-  const notes: string[] = [];
+  const out = emptyResult();
   for (const rawSpec of pack.specs) {
     let spec = rawSpec;
     if (!spec.startsWith("gh:") && !spec.startsWith("pack:")) {
       const referenced = findPack(spec, externalPacks);
       if (referenced) spec = `pack:${spec}`;
     }
-    const r = await install(spec, target);
-    installed.push(...r.installed);
-    skipped.push(...r.skipped);
-    notes.push(...r.notes);
+    mergeResults(out, await install(spec, target, cloner));
   }
-  return {
-    installed,
-    skipped,
-    notes: [...notes, `pack=${pack.name} (${pack.specs.length} specs)`],
-  };
+  out.notes.push(`pack=${pack.name} (${pack.specs.length} specs)`);
+  return out;
 }
 
-export async function install(spec: string, target = "./skills"): Promise<InstallResult> {
+export async function install(
+  spec: string,
+  target = "./skills",
+  cloner: Cloner = realClone,
+): Promise<InstallResult> {
   ensureDir(target);
-  if (spec.startsWith("gh:")) return installGh(spec, target);
+  if (spec.startsWith("gh:")) return installGh(spec, target, cloner);
   if (spec.startsWith("--pack")) {
     const name = spec.replace(/^--pack[=\s]+/, "").trim() || "default";
-    return installPack(name, target);
+    return installPack(name, target, cloner);
   }
-  if (spec.startsWith("pack:")) return installPack(spec.slice(5), target);
+  if (spec.startsWith("pack:")) return installPack(spec.slice(5), target, cloner);
   return {
-    installed: [],
+    ...emptyResult(),
     skipped: [spec],
+    ok: false,
     notes: [`unknown spec '${spec}'; use gh:owner/repo or pack:<name>`],
   };
 }

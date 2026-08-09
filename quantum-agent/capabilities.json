@@ -1,0 +1,130 @@
+{
+  "date": "2026-08-09",
+  "note": "Source of truth for the README capability matrix. Every 'implemented' claim MUST point to an evidence test that exists; any numeric count needs a passing countSource. External tools are NOT BENCHMARKED (no identical benchmark run). The README semantic gate (quantum verify) fails on drift, a missing evidence pointer, a fabricated count, or an unbacked marketing claim.",
+  "capabilities": [
+    {
+      "id": "oauth-claude",
+      "title": "Claude OAuth (Pro/Max) / API auth",
+      "status": "implemented",
+      "evidence": "test/auth.test.ts"
+    },
+    {
+      "id": "quantum-loop",
+      "title": "Parallel-hypothesis loop (superpose then measure)",
+      "status": "implemented",
+      "evidence": "test/measure.test.ts"
+    },
+    {
+      "id": "provider-neutral",
+      "title": "Provider-neutral runtimes + typed profiles (claude / openai-agents / codex)",
+      "status": "implemented",
+      "evidence": "test/provider-profiles.test.ts"
+    },
+    {
+      "id": "readme-verify",
+      "title": "README-as-spec command verifier",
+      "status": "implemented",
+      "evidence": "test/verify.test.ts"
+    },
+    {
+      "id": "capability-gate",
+      "title": "Capability-manifest semantic gate",
+      "status": "implemented",
+      "evidence": "test/capabilities.test.ts"
+    },
+    {
+      "id": "skills-local-git",
+      "title": "Local skills + installable Git sources (gh:owner/repo)",
+      "status": "implemented",
+      "evidence": "test/skills.test.ts"
+    },
+    {
+      "id": "skill-new-draft",
+      "title": "skill new writes a DRAFT (activate only after format + 2 fresh-context tests)",
+      "status": "implemented",
+      "evidence": "test/generate.test.ts"
+    },
+    {
+      "id": "workflows",
+      "title": "Canned workflows (issue-to-pr, pr-review-merge, bug-repro-fix, rfc-hyperplan)",
+      "status": "implemented",
+      "evidence": "test/workflows.test.ts"
+    },
+    {
+      "id": "reflection",
+      "title": "Post-task reflection to the local blackboard",
+      "status": "implemented",
+      "evidence": "test/reflect.test.ts"
+    },
+    {
+      "id": "permissions",
+      "title": "Unattended permission gating",
+      "status": "implemented",
+      "evidence": "test/permissions.test.ts"
+    },
+    {
+      "id": "local-cache",
+      "title": "Local LLM / HTTP response cache (sqlite)",
+      "status": "implemented",
+      "evidence": "test/cache.test.ts"
+    },
+    {
+      "id": "mcp-http",
+      "title": "MCP-style HTTP/SSE endpoints (quantum serve --mcp)",
+      "status": "experimental",
+      "note": "HTTP endpoints exist (Hono); not a full MCP stdio server; unbenchmarked"
+    },
+    {
+      "id": "mcp-client",
+      "title": "MCP client (sequential-thinking via the Claude SDK)",
+      "status": "experimental",
+      "note": "wired in the Claude adapter; unbenchmarked"
+    },
+    {
+      "id": "vision",
+      "title": "Image input (quantum see)",
+      "status": "experimental",
+      "note": "thin wrapper over the model's vision; unbenchmarked"
+    },
+    {
+      "id": "voice",
+      "title": "Voice in/out (quantum listen / --speak)",
+      "status": "experimental",
+      "note": "file transcription/TTS wrappers; the live loop is not implemented"
+    },
+    {
+      "id": "autowebsearch",
+      "title": "Best-effort pre-code web search",
+      "status": "experimental",
+      "note": "network best-effort; disabled in mock/no-auth runs"
+    },
+    {
+      "id": "remote-skill-aggregation",
+      "title": "Remote skill aggregation / large ecosystem counts",
+      "status": "not_implemented",
+      "note": "no remote index; local + Git sources only"
+    },
+    { "id": "gpu-dev-env", "title": "NVIDIA GPU dev environment", "status": "not_implemented" },
+    { "id": "mobile", "title": "Mobile integration", "status": "not_implemented" },
+    {
+      "id": "autoupdate",
+      "title": "Automatic dependency / skill-index updates",
+      "status": "not_implemented"
+    },
+    {
+      "id": "autolearn",
+      "title": "Auto-drafting new skills from reflection",
+      "status": "not_implemented"
+    },
+    {
+      "id": "autoverify",
+      "title": "Auto green + self-heal after every commit",
+      "status": "not_implemented"
+    }
+  ],
+  "external_comparisons": [
+    { "name": "OpenHands", "status": "not_benchmarked" },
+    { "name": "Sisyphus", "status": "not_benchmarked" },
+    { "name": "OpenClaw", "status": "not_benchmarked" }
+  ]
+}

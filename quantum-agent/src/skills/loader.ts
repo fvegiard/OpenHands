@@ -68,11 +68,21 @@ export function discover(roots: string[]): SkillManifest[] {
   for (const root of roots) {
     if (!existsSync(root)) continue;
     for (const name of readdirSync(root)) {
+      // Never descend into dot-directories (e.g. `.drafts` where offline
+      // placeholders live) — a placeholder must never become an active skill.
+      if (name.startsWith(".")) continue;
       const dir = join(root, name);
       if (!statSync(dir).isDirectory()) continue;
       const m = loadManifest(dir);
-      if (m) out.push(m);
+      // A skill explicitly marked placeholder/draft is not a real, active skill.
+      if (m && !isPlaceholder(m)) out.push(m);
     }
   }
   return out;
+}
+
+/** True when a manifest is an offline placeholder/draft (never active). */
+export function isPlaceholder(m: SkillManifest): boolean {
+  const fm = m.frontmatter as Record<string, unknown>;
+  return fm.status === "placeholder" || fm.draft === true || fm.draft === "true";
 }

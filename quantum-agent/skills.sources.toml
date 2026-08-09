@@ -1,46 +1,36 @@
 # Quantum Agent — skill sources
-# `quantum skill install --pack <name>` resolves through these.
-
-[[source]]
-name        = "skillkit"
-type        = "skillkit"
-description = "Cross-agent package manager — 400 000+ skills across 31 upstreams"
-command     = "skillkit"
-
-[[source]]
-name        = "clawhub"
-type        = "http"
-description = "OpenClaw's official skill registry — 13 729 skills"
-url         = "https://clawhub.dev/api/v1"
+# `quantum skill install --pack <name>` resolves through these. These are Git
+# repositories you can install from; counts (if any) belong to the upstream
+# projects and are NOT verified or aggregated by Quantum.
 
 [[source]]
 name        = "alirezarezvani"
 type        = "git"
-description = "232+ Claude Code skills across 9 domains"
+description = "Claude Code skills (upstream project)"
 url         = "https://github.com/alirezarezvani/claude-skills"
 
 [[source]]
 name        = "awesome-claude-code-toolkit"
 type        = "git"
-description = "135 agents + 35 curated skills + 14 MCP configs"
+description = "Claude Code agents + skills (upstream project)"
 url         = "https://github.com/rohitg00/awesome-claude-code-toolkit"
 
 [[source]]
 name        = "voltagent-openclaw"
 type        = "git"
-description = "5 400+ filtered OpenClaw skills"
+description = "OpenClaw skills (upstream project)"
 url         = "https://github.com/VoltAgent/awesome-openclaw-skills"
 
 [[source]]
 name        = "composio"
 type        = "git"
-description = "Curated Claude skills"
+description = "Curated Claude skills (upstream project)"
 url         = "https://github.com/ComposioHQ/awesome-claude-skills"
 
 [[source]]
 name        = "local"
 type        = "filesystem"
-description = "User-defined skills"
+description = "User-defined local skills"
 path        = "./skills-core"
 
 [packs]

@@ -2,12 +2,14 @@
 // Quantum CLI — command surface declared here matches the README spec.
 // Every subcommand here must appear in README.md (verified by `quantum verify`).
 
+import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { runAgent } from "./agent.ts";
 import { listAgents } from "./agents/registry.ts";
 import { resolveAuth } from "./auth.ts";
 import { watch } from "./automation/watcher.ts";
 import * as cache from "./cache/index.ts";
+import { checkCapabilities, loadManifest, readmePath } from "./capabilities.ts";
 import { lastSession } from "./memory.ts";
 import { see } from "./modal/vision.ts";
 import { transcribe } from "./modal/voice-in.ts";
@@ -133,12 +135,23 @@ program
 
 program
   .command("verify")
-  .description("Verify that the README matches the implemented CLI.")
+  .description("Verify the README matches the CLI AND every capability claim has evidence.")
   .action(() => {
     const r = verifyReadme();
     console.log(`blocks=${r.totalBlocks} lines=${r.totalLines} unknown=${r.unknown.length}`);
     for (const u of r.unknown) console.log(`- ${u.line}  // ${u.reason}`);
-    process.exitCode = r.ok ? 0 : 1;
+    // Capability semantic gate: README claims must be backed by evidence.
+    const root = process.cwd();
+    const violations = checkCapabilities(
+      readFileSync(readmePath(root), "utf8"),
+      loadManifest(root),
+      root,
+    );
+    console.log(
+      `capabilities: ${violations.length === 0 ? "OK" : `${violations.length} violation(s)`}`,
+    );
+    for (const c of violations) console.log(`- ${c.code}: ${c.detail}`);
+    process.exitCode = r.ok && violations.length === 0 ? 0 : 1;
   });
 
 program
@@ -189,6 +202,9 @@ skill
     const effective = opts.pack ? `pack:${opts.pack}` : (spec as string);
     const r = await install(effective);
     console.log(JSON.stringify(r, null, 2));
+    // Fail closed: a genuine clone failure exits nonzero. Offline placeholders
+    // are NOT_VERIFIED (not a failure, but never counted as installed).
+    process.exitCode = r.ok ? 0 : 1;
   });
 skill
   .command("translate <name>")
