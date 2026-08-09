@@ -9,6 +9,7 @@ const WORKFLOW = readFileSync(
 
 describe("quantum CI truth policy", () => {
   it("does not suppress whole Node warning categories", () => {
+    expect(WORKFLOW).toContain('NODE_OPTIONS: "--disable-warning=DEP0205"');
     expect(WORKFLOW).not.toContain("--disable-warning=ExperimentalWarning");
     expect(WORKFLOW).not.toContain("--no-warnings");
   });

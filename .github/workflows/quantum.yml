@@ -16,6 +16,9 @@ defaults:
     working-directory: quantum-agent
     shell: bash
 
+env:
+  NODE_OPTIONS: "--disable-warning=DEP0205"
+
 jobs:
   # Required stable lane: Node 22.12+ (the supported default). Deterministic
   # frozen-lockfile install + the full green gate (lint, typecheck, test,

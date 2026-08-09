@@ -7,12 +7,12 @@
     "quantum": "./src/cli.ts"
   },
   "scripts": {
-    "quantum": "tsx src/cli.ts",
-    "dev": "tsx watch src/cli.ts",
+    "quantum": "node --disable-warning=DEP0205 --import tsx src/cli.ts",
+    "dev": "node --disable-warning=DEP0205 --import tsx --watch src/cli.ts",
     "test": "vitest run",
     "test:json": "vitest run --reporter=default --reporter=json --outputFile=.vitest-results.json",
-    "verify": "tsx src/cli.ts verify",
-    "verify:results": "tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results",
+    "verify": "node --disable-warning=DEP0205 --import tsx src/cli.ts verify",
+    "verify:results": "node --disable-warning=DEP0205 --import tsx src/cli.ts verify --capabilities-results .vitest-results.json --require-results",
     "lint": "biome check . --write",
     "build": "tsc -p tsconfig.json --noEmit",
     "green": "biome check . --write && tsc -p tsconfig.json --noEmit && pnpm test:json && pnpm verify:results"
