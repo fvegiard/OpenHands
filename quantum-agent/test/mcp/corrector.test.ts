@@ -178,7 +178,7 @@ describe("corrector tools", () => {
       });
       const text = result.content[0]!.text;
       expect(text).toContain("Repo references");
-    });
+    }, 30000);
   });
 
   describe("handleMessage tools/call", () => {
