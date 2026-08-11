@@ -149,7 +149,7 @@ export function detectPackageManager(root: string): {
 }
 
 export function detectShell(): { detected: string | null; rcFiles: string[] } {
-  const shell = process.env.SHELL ?? process.env.COMSPEC ?? "unknown";
+  const shell = process.env.SHELL?.trim() || process.env.COMSPEC?.trim() || "unknown";
   const shellName = shell.split("/").pop() ?? shell;
   const rcFiles: string[] = [];
 

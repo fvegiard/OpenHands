@@ -118,6 +118,24 @@ describe("stack-validator", () => {
       const result = detectShell();
       expect(result.detected).toBeNull();
     });
+
+    it("returns unknown when SHELL is an empty string", () => {
+      vi.stubEnv("SHELL", "");
+      vi.stubEnv("COMSPEC", undefined);
+
+      const result = detectShell();
+      expect(result.detected).toBeNull();
+    });
+
+    it("detects tcsh rc files", () => {
+      vi.stubEnv("SHELL", "/bin/tcsh");
+      vi.stubEnv("HOME", join(tmpdir(), "fakehome"));
+      mkdirSync(join(tmpdir(), "fakehome", ".tcshrc"), { recursive: true });
+
+      const result = detectShell();
+      expect(result.detected).toBe("tcsh");
+      expect(result.rcFiles.some((f) => f.endsWith(".tcshrc"))).toBe(true);
+    });
   });
 
   describe("detectPathConventions", () => {
