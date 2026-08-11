@@ -8,12 +8,18 @@ import { listAgents } from "./agents/registry.ts";
 import { resolveAuth } from "./auth.ts";
 import { watch } from "./automation/watcher.ts";
 import * as cache from "./cache/index.ts";
+import { runLlmCorrection } from "./mcp/corrector.ts";
+import { runCheckEnvironment, runMapDrive } from "./mcp/pc-inspector.ts";
 import { lastSession } from "./memory.ts";
 import { see } from "./modal/vision.ts";
 import { transcribe } from "./modal/voice-in.ts";
+import { runSequentialThinking } from "./quantum/score.ts";
+import { runResearchTopic } from "./research/scout.ts";
+import { runValidateStack } from "./research/stack-validator.ts";
 import { start as startServer } from "./server.ts";
 import { generateAgent, generateSkill, generateTool, verifyAfter } from "./skills/generate.ts";
 import { install, listInstalled, searchInstalled, translateSkill } from "./skills/manager.ts";
+import { runGrep } from "./tools/repo.ts";
 import { startTui } from "./tui/app.tsx";
 import { verifyReadme } from "./verify.ts";
 import { listWorkflows } from "./workflows/index.ts";
@@ -24,20 +30,128 @@ const program = new Command("quantum")
 
 program
   .command("doctor")
-  .description("Diagnose the install (auth, tools, agents, skills).")
+  .description("Run the full quantum doctor inspection pipeline.")
   .option("--mcp", "include MCP endpoint check")
-  .action((opts) => {
+  .option("--root <path>", "project root to inspect", ".")
+  .action(async (opts) => {
+    const root = opts.root;
+    const report: string[] = [];
+    const timestamp = new Date().toISOString();
+
+    report.push(`# Quantum Doctor Report`);
+    report.push(`timestamp=${timestamp}`);
+    report.push(`root=${root}`);
+    report.push("");
+
+    report.push("## 1. Auth");
     const auth = resolveAuth();
+    report.push(`mode=${auth.mode}`);
+    for (const note of auth.notes) report.push(`  - ${note}`);
+
+    report.push("");
+    report.push("## 2. Agents / Skills");
     const agents = listAgents();
     const skills = listInstalled();
-    console.log(`auth     = ${auth.mode}`);
-    for (const note of auth.notes) console.log(`           - ${note}`);
-    console.log(`agents   = ${agents.length}`);
-    console.log(`skills   = ${skills.length}`);
-    console.log(`mcp      = ${opts.mcp ? "checked" : "(skipped — pass --mcp)"}`);
-    console.log(
-      `gpu      = ${process.env.NVIDIA_VISIBLE_DEVICES ? "visible" : "(not in NVIDIA container)"}`,
+    report.push(`agents=${agents.length}`);
+    report.push(`skills=${skills.length}`);
+
+    report.push("");
+    report.push("## 3. PC Map");
+    try {
+      const map = runMapDrive({ path: root, maxDepth: 2 });
+      report.push(map.content[0]!.text.split("\n").slice(0, 40).join("\n"));
+    } catch (err) {
+      report.push(`map_drive failed: ${(err as Error).message}`);
+    }
+
+    report.push("");
+    report.push("## 4. Stack Validation");
+    try {
+      const stack = await runValidateStack({ root, research: true });
+      report.push(stack.summary);
+    } catch (err) {
+      report.push(`stack validation failed: ${(err as Error).message}`);
+    }
+
+    report.push("");
+    report.push("## 5. Environment");
+    try {
+      const env = runCheckEnvironment({});
+      report.push(env.content[0]!.text.split("\n").slice(0, 20).join("\n"));
+    } catch (err) {
+      report.push(`environment check failed: ${(err as Error).message}`);
+    }
+
+    report.push("");
+    report.push("## 6. Codebase Index");
+    try {
+      const grepResult = await runGrep({ pattern: "TODO|FIXME|HACK", path: root });
+      const grepText = grepResult.content[0]!.text;
+      const lines = grepText.split("\n").filter((l) => !l.includes("(no matches)"));
+      report.push(`grep_hits=${lines.length}`);
+      for (const line of lines.slice(0, 10)) report.push(`  ${line}`);
+    } catch (err) {
+      report.push(`codebase index failed: ${(err as Error).message}`);
+    }
+
+    report.push("");
+    report.push("## 7. Research");
+    try {
+      const brief = await runResearchTopic({ topic: `project health ${root}`, scouts: 2 });
+      report.push(`query=${brief.query}`);
+      report.push(`hits=${brief.uniqueHits}`);
+      report.push(brief.summary);
+    } catch (err) {
+      report.push(`research failed: ${(err as Error).message}`);
+    }
+
+    report.push("");
+    report.push("## 8. Corrections");
+    try {
+      const correction = await runLlmCorrection({
+        errorMessage: "quantum doctor pipeline inspection",
+        stackTrace: "",
+        webSearch: true,
+        repoSearch: true,
+      });
+      report.push(correction.content[0]!.text.split("\n").slice(0, 30).join("\n"));
+    } catch (err) {
+      report.push(`correction proposal failed: ${(err as Error).message}`);
+    }
+
+    report.push("");
+    report.push("## 9. Sequential-Thinking Evaluation");
+    const branches = ["inspect", "research", "correct"];
+    const evaluations: { branch: string; score: number }[] = [];
+    for (const branch of branches) {
+      const thought = runSequentialThinking("quantum doctor pipeline inspection", branch);
+      evaluations.push({ branch, score: thought.score });
+      report.push(`branch=${branch} score=${thought.score}/10`);
+      report.push(
+        `  options=${thought.options.length} risks=${thought.risks.length} evidence=${thought.evidence.length}`,
+      );
+    }
+
+    report.push("");
+    report.push("## 10. Delivery Report");
+    const avgScore = evaluations.reduce((s, e) => s + e.score, 0) / evaluations.length;
+    const mcpStatus = opts.mcp ? "checked" : "(skipped — pass --mcp)";
+    const gpuStatus = process.env.NVIDIA_VISIBLE_DEVICES ? "visible" : "(not in NVIDIA container)";
+
+    report.push(`final_score=${avgScore.toFixed(2)}/10`);
+    report.push(`mcp=${mcpStatus}`);
+    report.push(`gpu=${gpuStatus}`);
+    report.push(`agents=${agents.length}`);
+    report.push(`skills=${skills.length}`);
+    report.push(`auth=${auth.mode}`);
+    report.push("");
+    report.push("---");
+    report.push(
+      "Delivery score computed from sequential-thinking evaluations across all branches.",
     );
+
+    console.log(report.join("\n"));
+    process.exitCode = avgScore < 5 ? 1 : 0;
   });
 
 program

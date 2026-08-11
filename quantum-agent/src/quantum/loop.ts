@@ -6,6 +6,7 @@ import { priors } from "./amplify.ts";
 import { classify } from "./intent.ts";
 import { type BranchScore, interfere } from "./interfere.ts";
 import { type Measurement, measure } from "./measure.ts";
+import { runSequentialThinking, type ThinkingStep } from "./score.ts";
 import { blackboardFor, prepare } from "./superpose.ts";
 import { contrarianHypothesis, shouldTunnel } from "./tunnel.ts";
 
@@ -29,6 +30,15 @@ export interface QuantumRunResult {
   tunneled: boolean;
 }
 
+function formatThought(branch: string, thought: ThinkingStep): string {
+  return [
+    `[sequential-thinking] branch=${branch} score=${thought.score}/10`,
+    `options:\n${thought.options.map((o) => `  - ${o}`).join("\n")}`,
+    `risks:\n${thought.risks.map((r) => `  - ${r}`).join("\n")}`,
+    `evidence:\n${thought.evidence.map((e) => `  - ${e}`).join("\n")}`,
+  ].join("\n");
+}
+
 export async function runQuantum(
   task: string,
   run: BranchRunner,
@@ -42,6 +52,8 @@ export async function runQuantum(
   const bb = blackboardFor(task);
   await Promise.all(
     hypotheses.map(async (h) => {
+      const thought = runSequentialThinking(task, h.branch);
+      bb.write(h.branch, "hypothesis", formatThought(h.branch, thought), thought.score);
       const outcome = await run(h);
       bb.write(outcome.branch, "conclusion", outcome.conclusion, outcome.score);
     }),
