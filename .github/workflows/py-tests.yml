@@ -103,6 +103,7 @@ jobs:
     name: Coverage Comment
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs: [test-on-linux, test-enterprise]
 
     permissions:
