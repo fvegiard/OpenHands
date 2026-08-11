@@ -60,7 +60,7 @@ describe("doctor pipeline integration", () => {
   it("indexes the codebase via grep", async () => {
     const root = makeProjectRoot();
     try {
-      const result = await runGrep({ pattern: "TODO|FIXME", path: root });
+      const result = await runGrep({ pattern: "TODO|FIXME" }, root);
       const text = result.content[0]!.text;
       expect(typeof text).toBe("string");
     } finally {

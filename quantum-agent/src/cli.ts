@@ -85,7 +85,7 @@ program
     report.push("");
     report.push("## 6. Codebase Index");
     try {
-      const grepResult = await runGrep({ pattern: "TODO|FIXME|HACK", path: root });
+      const grepResult = await runGrep({ pattern: "TODO|FIXME|HACK" }, root);
       const grepText = grepResult.content[0]!.text;
       const lines = grepText.split("\n").filter((l) => !l.includes("(no matches)"));
       report.push(`grep_hits=${lines.length}`);

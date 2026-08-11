@@ -71,12 +71,25 @@ export function runSequentialThinking(task: string, branch: string): ThinkingSte
     "Defer the change and gather more evidence first",
   ];
 
+  if (taskLower.includes("fix") || taskLower.includes("bug")) {
+    options.push("Add regression tests before applying the fix");
+  }
+  if (taskLower.includes("build") || taskLower.includes("create")) {
+    options.push("Prototype a minimal version first to validate feasibility");
+  }
+  if (branchLower.includes("review")) {
+    options.push("Run a second-pass review after the initial implementation");
+  }
+
   const risks: string[] = [];
   if (taskLower.includes("fix") || branchLower.includes("coder")) {
     risks.push("Breaking existing functionality in adjacent modules");
   }
   if (taskLower.includes("build") || taskLower.includes("create")) {
     risks.push("Scope creep beyond the original requirements");
+  }
+  if (taskLower.includes("refactor")) {
+    risks.push("Introducing subtle behavior changes during cleanup");
   }
   risks.push("Performance regression under load");
   risks.push("Missing edge cases not covered by tests");
@@ -89,9 +102,16 @@ export function runSequentialThinking(task: string, branch: string): ThinkingSte
     "Dependency and type-check results",
   ];
 
+  if (taskLower.includes("auth") || taskLower.includes("security")) {
+    evidence.push("Security audit reports and dependency vulnerability scans");
+  }
+  if (taskLower.includes("performance") || taskLower.includes("slow")) {
+    evidence.push("Profiling data and benchmark comparisons");
+  }
+
   const score =
     Math.round(
-      Math.min((options.length * 0.3 + risks.length * 0.3 + evidence.length * 0.4) / 3, 10) * 100,
+      Math.min(options.length * 0.3 + risks.length * 0.3 + evidence.length * 0.4, 10) * 100,
     ) / 100;
 
   return { options, risks, evidence, score };
