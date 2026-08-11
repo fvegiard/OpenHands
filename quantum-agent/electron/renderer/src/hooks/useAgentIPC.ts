@@ -130,5 +130,11 @@ export function useCorrections() {
     return result;
   }, []);
 
-  return { items, apply };
+  const dismiss = useCallback(async (id: string) => {
+    const result = await window.quantumAPI.corrections.dismiss(id);
+    if (!result.ok) console.error("dismiss failed:", result.error);
+    return result;
+  }, []);
+
+  return { items, apply, dismiss };
 }

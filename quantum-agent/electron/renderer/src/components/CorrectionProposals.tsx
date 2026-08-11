@@ -9,7 +9,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export default function CorrectionProposals() {
-  const { items, apply } = useCorrections();
+  const { items, apply, dismiss } = useCorrections();
 
   const formatTime = (ts: number) =>
     new Date(ts).toLocaleTimeString("en-US", { hour12: false });
@@ -43,7 +43,7 @@ export default function CorrectionProposals() {
               <button onClick={() => apply(c.id)} className="success">
                 Apply Fix
               </button>
-              <button onClick={() => {}} className="danger">
+              <button onClick={() => dismiss(c.id)} className="danger">
                 Dismiss
               </button>
             </div>

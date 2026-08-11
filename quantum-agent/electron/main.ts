@@ -195,7 +195,6 @@ function createWindow(): void {
 async function ensureServerRunning(): Promise<number> {
   if (serverProcess && serverProcess.exitCode === null) return 8765;
   const serverBin = path.join(PROJECT_ROOT, "node_modules", ".bin", "tsx");
-  const _serverEntry = path.join(PROJECT_ROOT, "src", "cli.ts");
   if (!fs.existsSync(serverBin)) {
     throw new Error("tsx not found — run pnpm install first");
   }
@@ -417,6 +416,17 @@ ipcMain.handle("corrections:apply", async (_event, id: string) => {
     addLog("system", `Applied correction: ${c.type} — ${c.message}`);
   }
   return { ok: true, applied: c };
+});
+
+ipcMain.handle("corrections:dismiss", async (_event, id: string) => {
+  const idx = corrections.findIndex((c) => c.id === id);
+  if (idx === -1) return { ok: false, error: "not found" };
+  const c = corrections[idx];
+  corrections.splice(idx, 1);
+  if (mainWindow?.webContents) {
+    mainWindow.webContents.send("corrections:update", corrections);
+  }
+  return { ok: true, dismissed: c };
 });
 
 app.whenReady().then(() => {

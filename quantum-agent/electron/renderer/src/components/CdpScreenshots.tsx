@@ -1,9 +1,17 @@
+import { useState } from "react";
 import { useCdpScreenshots } from "../hooks/useAgentIPC";
 
 export default function CdpScreenshots() {
   const items = useCdpScreenshots();
   const [selected, setSelected] = useState<string | null>(null);
   const current = items.find((s) => s.id === selected) || items[0];
+
+  const handleKeyDown = (e: KeyboardEvent, id: string) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSelected(id);
+    }
+  };
 
   return (
     <div className="panel">
@@ -20,7 +28,10 @@ export default function CdpScreenshots() {
             <div
               key={s.id}
               className={`cdp-thumb ${selected === s.id ? "cdp-selected" : ""}`}
+              role="button"
+              tabIndex={0}
               onClick={() => setSelected(s.id)}
+              onKeyDown={(e) => handleKeyDown(e, s.id)}
             >
               <img src={s.dataUrl} alt={s.title || "screenshot"} />
               <span className="cdp-thumb-title">{s.title || s.url || `#${s.id.slice(0, 8)}`}</span>

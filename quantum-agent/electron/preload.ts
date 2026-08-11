@@ -117,6 +117,7 @@ export interface QuantumAPI {
     get(): Promise<CorrectionProposal[]>;
     add(correction: Omit<CorrectionProposal, "id" | "timestamp">): Promise<CorrectionProposal>;
     apply(id: string): Promise<{ ok: boolean; applied?: CorrectionProposal; error?: string }>;
+    dismiss(id: string): Promise<{ ok: boolean; dismissed?: CorrectionProposal; error?: string }>;
     onUpdate(callback: (corrections: CorrectionProposal[]) => void): () => void;
   };
 }
@@ -191,6 +192,7 @@ const api: QuantumAPI = {
     get: () => ipcRenderer.invoke("corrections:get"),
     add: (correction) => ipcRenderer.invoke("corrections:add", correction),
     apply: (id) => ipcRenderer.invoke("corrections:apply", id),
+    dismiss: (id) => ipcRenderer.invoke("corrections:dismiss", id),
     onUpdate: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, corrections: CorrectionProposal[]) =>
         callback(corrections);

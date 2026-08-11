@@ -47,10 +47,10 @@ export default function App() {
             disabled={isStarting}
             className="prompt-input"
           />
-          <button onClick={handleStart} disabled={isStarting || !prompt.trim()} className="primary">
+          <button type="button" onClick={handleStart} disabled={isStarting || !prompt.trim()} className="primary">
             {isStarting ? "Starting..." : "▶ Start"}
           </button>
-          <button onClick={handleStop} className="danger">
+          <button type="button" onClick={handleStop} className="danger">
             ■ Stop
           </button>
         </div>
