@@ -66,12 +66,6 @@ interface FileEntry {
   lines: string[];
 }
 
-interface IndexStore {
-  root: string;
-  files: Map<string, FileEntry>;
-  indexedAt: string;
-}
-
 class IndexStore {
   root: string;
   files: Map<string, FileEntry>;
@@ -284,8 +278,7 @@ export async function runFindRefs(args: { symbol: string; limit?: number }): Pro
   const limit = args.limit ?? 30;
   const re = new RegExp(`\\b${escRegex(sym)}\\b`);
   const hits: { file: string; line: number; text: string }[] = [];
-  outer:
-  for (const [relPath, entry] of idx.files) {
+  outer: for (const [relPath, entry] of idx.files) {
     for (let i = 0; i < entry.lines.length; i++) {
       const line = entry.lines[i]!;
       if (re.test(line)) {
