@@ -1,7 +1,15 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/dist", "!**/.quantum", "!**/skills", "!**/coverage"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/out",
+      "!**/.quantum",
+      "!**/skills",
+      "!**/coverage"
+    ]
   },
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "formatter": {

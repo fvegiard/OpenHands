@@ -378,7 +378,7 @@ export function runDetectShell(_input: unknown): ToolResult {
     } else if (rc.startsWith("$")) {
       full = process.env[rc.slice(1)] ?? rc;
     } else {
-      full = `${home}/${rc}`;
+      full = `${home}${process.platform === "win32" ? "\\" : "/"}${rc}`;
     }
     if (full) {
       try {
