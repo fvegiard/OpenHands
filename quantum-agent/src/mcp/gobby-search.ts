@@ -72,7 +72,22 @@ interface IndexStore {
   indexedAt: string;
 }
 
-export let index: IndexStore = { root: process.cwd(), files: new Map(), indexedAt: "" };
+class IndexStore {
+  root: string;
+  files: Map<string, FileEntry>;
+  indexedAt: string;
+
+  constructor() {
+    this.root = process.cwd();
+    this.files = new Map();
+    this.indexedAt = "";
+  }
+}
+
+let _index = new IndexStore();
+export function getIndex(): IndexStore {
+  return _index;
+}
 
 function walkDir(dir: string, root: string, depth = 0, maxDepth = 10): FileEntry[] {
   if (depth > maxDepth) return [];
@@ -161,14 +176,14 @@ export async function runIndex(args: { root?: string; maxDepth?: number }): Prom
     extractSymbols(entry);
     files.set(entry.path, entry);
   }
-  index = { root: target, files, indexedAt: new Date().toISOString() };
+  _index = { root: target, files, indexedAt: new Date().toISOString() };
   const totalSymbols = [...files.values()].reduce((s, f) => s + f.symbols.length, 0);
   const totalStrings = [...files.values()].reduce((s, f) => s + f.strings.length, 0);
   return {
     content: [
       {
         type: "text",
-        text: `Indexed ${files.size} files in ${target}\nSymbols: ${totalSymbols}\nStrings: ${totalStrings}\nTimestamp: ${index.indexedAt}`,
+        text: `Indexed ${files.size} files in ${target}\nSymbols: ${totalSymbols}\nStrings: ${totalStrings}\nTimestamp: ${_index.indexedAt}`,
       },
     ],
   };
@@ -185,7 +200,8 @@ export async function runSearch(args: {
   symbolOnly?: boolean;
   limit?: number;
 }): Promise<ToolResult> {
-  if (index.files.size === 0) {
+  const idx = getIndex();
+  if (idx.files.size === 0) {
     return {
       isError: true,
       content: [{ type: "text", text: "Index is empty. Run index_repo first." }],
@@ -196,7 +212,7 @@ export async function runSearch(args: {
   const results: { file: string; line: number; text: string; score: number }[] = [];
   const seen = new Set<string>();
   const qTokens = tokenize(q);
-  for (const [relPath, entry] of index.files) {
+  for (const [relPath, entry] of idx.files) {
     for (let i = 0; i < entry.lines.length; i++) {
       const line = entry.lines[i]!;
       const lineLower = line.toLowerCase();
@@ -257,7 +273,8 @@ export const findRefsSchema = {
 };
 
 export async function runFindRefs(args: { symbol: string; limit?: number }): Promise<ToolResult> {
-  if (index.files.size === 0) {
+  const idx = getIndex();
+  if (idx.files.size === 0) {
     return {
       isError: true,
       content: [{ type: "text", text: "Index is empty. Run index_repo first." }],
@@ -267,15 +284,15 @@ export async function runFindRefs(args: { symbol: string; limit?: number }): Pro
   const limit = args.limit ?? 30;
   const re = new RegExp(`\\b${escRegex(sym)}\\b`);
   const hits: { file: string; line: number; text: string }[] = [];
-  for (const [relPath, entry] of index.files) {
+  outer:
+  for (const [relPath, entry] of idx.files) {
     for (let i = 0; i < entry.lines.length; i++) {
       const line = entry.lines[i]!;
       if (re.test(line)) {
         hits.push({ file: relPath, line: i + 1, text: line.trimEnd() });
-        if (hits.length >= limit) break;
+        if (hits.length >= limit) break outer;
       }
     }
-    if (hits.length >= limit) break;
   }
   if (hits.length === 0) {
     return { content: [{ type: "text", text: `No references to "${sym}" found.` }] };
@@ -308,13 +325,13 @@ export async function runCdpDiscover(args: {
 }): Promise<ToolResult> {
   const start = args.portStart ?? 9222;
   const end = args.portEnd ?? 9299;
-  const _timeout = args.wsTimeoutMs ?? 4000;
+  const timeout = args.wsTimeoutMs ?? 4000;
   const discovered: { port: number; url: string; title?: string; type?: string }[] = [];
   for (let port = start; port <= end; port++) {
     let _statusLine: string;
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const timer = setTimeout(() => ctrl.abort(), timeout);
       const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
         signal: ctrl.signal as any,
       });
@@ -327,7 +344,7 @@ export async function runCdpDiscover(args: {
     let targets: { id: string; title: string; type: string; url: string }[];
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const timer = setTimeout(() => ctrl.abort(), timeout);
       const res = await fetch(`http://127.0.0.1:${port}/json`, { signal: ctrl.signal as any });
       clearTimeout(timer);
       if (!res.ok) continue;

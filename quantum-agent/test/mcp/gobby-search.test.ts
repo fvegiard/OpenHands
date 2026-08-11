@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildGobbyToolset,
-  index,
+  getIndex,
   runCdpDiscover,
   runFindRefs,
   runIndex,
@@ -44,9 +44,9 @@ function cleanup(): void {
 }
 
 function resetIndex(): void {
-  index.files.clear();
-  index.root = process.cwd();
-  index.indexedAt = "";
+  getIndex().files.clear();
+  getIndex().root = process.cwd();
+  getIndex().indexedAt = "";
 }
 
 describe("gobby index_repo", () => {
@@ -114,6 +114,27 @@ describe("gobby find_references", () => {
     const r = await runFindRefs({ symbol: "nonexistent_xyz_999" });
     expect(r.isError).toBeUndefined();
     expect(r.content[0]!.text).toContain("No references");
+  });
+
+  it("stops scanning after returning exactly limit hits", async () => {
+    cleanup();
+    resetIndex();
+    mkdirSync(TEST_ROOT, { recursive: true });
+    for (let f = 0; f < 50; f++) {
+      writeFileSync(
+        join(TEST_ROOT, `file${f}.ts`),
+        `export const target = ${f};\n// reference to target\nconst x = target;\n`,
+        "utf8",
+      );
+    }
+    await runIndex({ root: TEST_ROOT });
+    const r = await runFindRefs({ symbol: "target", limit: 5 });
+    expect(r.isError).toBeUndefined();
+    const lines = r.content[0]!.text.split("\n").filter((l) => l.trim().length > 0);
+    expect(lines.length).toBeLessThanOrEqual(10);
+    const hitCount = (r.content[0]!.text.match(/target/g) ?? []).length;
+    expect(hitCount).toBeLessThanOrEqual(5);
+    cleanup();
   });
 });
 
