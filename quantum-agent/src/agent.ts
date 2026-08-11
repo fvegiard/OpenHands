@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { type AuthResult, resolveAuth } from "./auth.ts";
 import { DEFAULT_MODEL } from "./config.ts";
 import { buildHooks } from "./hooks.ts";
+import { buildGobbyToolset } from "./mcp/gobby-search.ts";
 import { appendTranscript, touchSession } from "./memory.ts";
 import { buildCanUseTool } from "./permissions.ts";
 import { classify } from "./quantum/intent.ts";
@@ -66,12 +67,15 @@ const SYSTEM_PROMPT_APPEND =
  * Build the MCP server map. Quantum's in-process tools always go in. We also
  * wire the sequential-thinking server unconditionally (`npx -y` resolves it on
  * first use) so the orchestrator can do chained reasoning at every decision
- * point.
+ * point, and the gobby codebase-search server when available.
  */
-function buildMcpServers(quantum: unknown): Record<string, unknown> {
+function buildMcpServers(quantum: unknown, gobby: unknown): Record<string, unknown> {
   const servers: Record<string, unknown> = {};
   if (quantum) {
     servers.quantum = { type: "sdk", name: "quantum", instance: quantum };
+  }
+  if (gobby) {
+    servers.gobby = { type: "sdk", name: "gobby", instance: gobby };
   }
   servers["sequential-thinking"] = {
     type: "stdio",
@@ -181,7 +185,8 @@ export async function runAgent(prompt: string, opts: RunOptions = {}): Promise<R
   }
 
   const toolset = await buildQuantumToolset();
-  const mcpServers = buildMcpServers(toolset.serverInstance);
+  const gobbyToolset = await buildGobbyToolset();
+  const mcpServers = buildMcpServers(toolset.serverInstance, gobbyToolset.serverInstance);
 
   // Prompt caching — mark the long stable parts (system prompt + tool defs)
   // ephemeral so they get an 80-95% cache-hit rate after the first call.
