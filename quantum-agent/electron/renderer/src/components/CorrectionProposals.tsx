@@ -11,8 +11,7 @@ const TYPE_COLORS: Record<string, string> = {
 export default function CorrectionProposals() {
   const { items, apply, dismiss } = useCorrections();
 
-  const formatTime = (ts: number) =>
-    new Date(ts).toLocaleTimeString("en-US", { hour12: false });
+  const formatTime = (ts: number) => new Date(ts).toLocaleTimeString("en-US", { hour12: false });
 
   return (
     <div className="panel">
@@ -21,9 +20,7 @@ export default function CorrectionProposals() {
         <span className="badge">{items.length} pending</span>
       </div>
       <div className="corrections-list">
-        {items.length === 0 && (
-          <div className="empty-state">No corrections proposed</div>
-        )}
+        {items.length === 0 && <div className="empty-state">No corrections proposed</div>}
         {items.map((c) => (
           <div key={c.id} className="correction-card">
             <div className="correction-header">
@@ -36,14 +33,12 @@ export default function CorrectionProposals() {
               <span className="correction-time">[{formatTime(c.timestamp)}]</span>
             </div>
             <div className="correction-message">{c.message}</div>
-            {c.patch && (
-              <pre className="correction-patch">{c.patch}</pre>
-            )}
+            {c.patch && <pre className="correction-patch">{c.patch}</pre>}
             <div className="correction-actions">
-              <button onClick={() => apply(c.id)} className="success">
+              <button type="button" onClick={() => apply(c.id)} className="success">
                 Apply Fix
               </button>
-              <button onClick={() => dismiss(c.id)} className="danger">
+              <button type="button" onClick={() => dismiss(c.id)} className="danger">
                 Dismiss
               </button>
             </div>

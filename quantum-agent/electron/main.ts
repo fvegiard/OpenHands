@@ -374,13 +374,17 @@ ipcMain.handle("cdp:screenshot", async () => {
   return screenshots.slice(-20);
 });
 
-ipcMain.handle("cdp:add-screenshot", async (_event, screenshot: Omit<CdpScreenshot, "id" | "timestamp">) => {
-  const entry: CdpScreenshot = { id: uid(), timestamp: Date.now(), ...screenshot };
-  screenshots.push(entry);
-  if (screenshots.length > MAX_SCREENSHOTS) screenshots.splice(0, screenshots.length - MAX_SCREENSHOTS);
-  mainWindow?.webContents.send("cdp:screenshot:new", entry);
-  return entry;
-});
+ipcMain.handle(
+  "cdp:add-screenshot",
+  async (_event, screenshot: Omit<CdpScreenshot, "id" | "timestamp">) => {
+    const entry: CdpScreenshot = { id: uid(), timestamp: Date.now(), ...screenshot };
+    screenshots.push(entry);
+    if (screenshots.length > MAX_SCREENSHOTS)
+      screenshots.splice(0, screenshots.length - MAX_SCREENSHOTS);
+    mainWindow?.webContents.send("cdp:screenshot:new", entry);
+    return entry;
+  },
+);
 
 ipcMain.handle("research:get", () => researchBriefs.slice(-50));
 ipcMain.handle("research:add", async (_event, brief: Omit<ResearchBrief, "id" | "timestamp">) => {
@@ -393,14 +397,17 @@ ipcMain.handle("research:add", async (_event, brief: Omit<ResearchBrief, "id" | 
 });
 
 ipcMain.handle("corrections:get", () => corrections.slice(-50));
-ipcMain.handle("corrections:add", async (_event, correction: Omit<CorrectionProposal, "id" | "timestamp">) => {
-  const entry: CorrectionProposal = { id: uid(), timestamp: Date.now(), ...correction };
-  corrections.push(entry);
-  if (corrections.length > MAX_CORRECTIONS)
-    corrections.splice(0, corrections.length - MAX_CORRECTIONS);
-  mainWindow?.webContents.send("corrections:update", corrections);
-  return entry;
-});
+ipcMain.handle(
+  "corrections:add",
+  async (_event, correction: Omit<CorrectionProposal, "id" | "timestamp">) => {
+    const entry: CorrectionProposal = { id: uid(), timestamp: Date.now(), ...correction };
+    corrections.push(entry);
+    if (corrections.length > MAX_CORRECTIONS)
+      corrections.splice(0, corrections.length - MAX_CORRECTIONS);
+    mainWindow?.webContents.send("corrections:update", corrections);
+    return entry;
+  },
+);
 
 ipcMain.handle("corrections:apply", async (_event, id: string) => {
   const idx = corrections.findIndex((c) => c.id === id);

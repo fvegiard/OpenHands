@@ -6,13 +6,6 @@ export default function CdpScreenshots() {
   const [selected, setSelected] = useState<string | null>(null);
   const current = items.find((s) => s.id === selected) || items[0];
 
-  const handleKeyDown = (e: KeyboardEvent, id: string) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      setSelected(id);
-    }
-  };
-
   return (
     <div className="panel">
       <div className="panel-header">
@@ -21,21 +14,17 @@ export default function CdpScreenshots() {
       </div>
       <div className="cdp-layout">
         <div className="cdp-list">
-          {items.length === 0 && (
-            <div className="empty-state">No screenshots yet</div>
-          )}
+          {items.length === 0 && <div className="empty-state">No screenshots yet</div>}
           {items.map((s) => (
-            <div
+            <button
               key={s.id}
+              type="button"
               className={`cdp-thumb ${selected === s.id ? "cdp-selected" : ""}`}
-              role="button"
-              tabIndex={0}
               onClick={() => setSelected(s.id)}
-              onKeyDown={(e) => handleKeyDown(e, s.id)}
             >
               <img src={s.dataUrl} alt={s.title || "screenshot"} />
               <span className="cdp-thumb-title">{s.title || s.url || `#${s.id.slice(0, 8)}`}</span>
-            </div>
+            </button>
           ))}
         </div>
         <div className="cdp-viewer">

@@ -26,16 +26,18 @@ function TreeNode({ node, depth = 0 }: { node: DriveNode; depth?: number }) {
   return (
     <div className="drive-tree-node">
       <div className="drive-tree-row" style={{ paddingLeft: depth * 16 + 4 }}>
-        <span className="drive-toggle" onClick={() => setExpanded(!expanded)}>
+        <button type="button" className="drive-toggle" onClick={() => setExpanded(!expanded)}>
           {isDir ? (expanded ? "▼" : "▶") : "  "}
-        </span>
+        </button>
         <span className={`drive-icon ${isDir ? "dir-icon" : "file-icon"}`}>
           {isDir ? "📁" : "📄"}
         </span>
-        <span className="drive-name" onClick={handleOpen}>{node.name}</span>
+        <button type="button" className="drive-name" onClick={handleOpen}>
+          {node.name}
+        </button>
         <span className="drive-size">{formatSize(node.size)}</span>
         {!isDir && (
-          <button className="drive-goto" onClick={handleGoto} title="Open in editor">
+          <button type="button" className="drive-goto" onClick={handleGoto} title="Open in editor">
             ✏️
           </button>
         )}
@@ -70,7 +72,7 @@ function buildTree(nodes: DriveNode[]): DriveNode[] {
 
   for (const file of files) {
     const inDir = dirs.some(
-      (d) => file.path.startsWith(`${d.path}/`) || file.path.startsWith(`${d.path}\\`)
+      (d) => file.path.startsWith(`${d.path}/`) || file.path.startsWith(`${d.path}\\`),
     );
     if (!inDir) root.push(file);
   }
@@ -86,12 +88,12 @@ export default function DriveMap() {
     <div className="panel">
       <div className="panel-header">
         <h2>🗂️ Drive Map</h2>
-        <button onClick={refresh}>Refresh</button>
+        <button type="button" onClick={refresh}>
+          Refresh
+        </button>
       </div>
       <div className="drive-map">
-        {tree.length === 0 && (
-          <div className="empty-state">No files loaded</div>
-        )}
+        {tree.length === 0 && <div className="empty-state">No files loaded</div>}
         {tree.map((node) => (
           <TreeNode key={node.path} node={node} />
         ))}

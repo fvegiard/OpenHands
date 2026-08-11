@@ -19,7 +19,9 @@ export default function AgentStatus() {
     <div className="agent-status">
       <span className="status-dot" style={{ background: STATUS_COLORS[state.status] }} />
       <span className="status-label">{STATUS_LABELS[state.status]}</span>
-      {state.sessionId && <span className="status-session">Session: {state.sessionId.slice(0, 12)}...</span>}
+      {state.sessionId && (
+        <span className="status-session">Session: {state.sessionId.slice(0, 12)}...</span>
+      )}
       {state.error && <span className="status-error">{state.error}</span>}
     </div>
   );

@@ -1,5 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import type { LogEntry, ErrorEntry, StackFrame, AgentState, CdpScreenshot, ResearchBrief, CorrectionProposal } from "../preload.ts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  AgentState,
+  CdpScreenshot,
+  CorrectionProposal,
+  ErrorEntry,
+  LogEntry,
+  ResearchBrief,
+  StackFrame,
+} from "../preload.ts";
 
 export function useAgentStatus() {
   const [state, setState] = useState<AgentState>({
@@ -84,7 +92,9 @@ export function useDrive() {
     setNodes(data);
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   return { nodes, refresh };
 }

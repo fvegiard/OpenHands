@@ -1,4 +1,4 @@
-import { TABS, TabId } from "../types";
+import { TABS, type TabId } from "../types";
 
 interface Props {
   active: TabId;
@@ -11,6 +11,7 @@ export default function TabNav({ active, onChange }: Props) {
       {TABS.map((tab) => (
         <button
           key={tab.id}
+          type="button"
           className={`tab-btn ${active === tab.id ? "tab-active" : ""}`}
           onClick={() => onChange(tab.id)}
         >

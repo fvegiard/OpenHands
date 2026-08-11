@@ -76,7 +76,10 @@ export interface QuantumAPI {
     onStatus(callback: (status: AgentState) => void): () => void;
   };
   mcp: {
-    callTool(tool: string, args: Record<string, unknown>): Promise<{
+    callTool(
+      tool: string,
+      args: Record<string, unknown>,
+    ): Promise<{
       ok: boolean;
       data?: unknown;
       error?: string;
@@ -174,7 +177,8 @@ const api: QuantumAPI = {
     getScreenshots: () => ipcRenderer.invoke("cdp:screenshot"),
     addScreenshot: (screenshot) => ipcRenderer.invoke("cdp:add-screenshot", screenshot),
     onNewScreenshot: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, screenshot: CdpScreenshot) => callback(screenshot);
+      const handler = (_event: Electron.IpcRendererEvent, screenshot: CdpScreenshot) =>
+        callback(screenshot);
       ipcRenderer.on("cdp:screenshot:new", handler);
       return () => ipcRenderer.removeListener("cdp:screenshot:new", handler);
     },
@@ -183,7 +187,8 @@ const api: QuantumAPI = {
     get: () => ipcRenderer.invoke("research:get"),
     add: (brief) => ipcRenderer.invoke("research:add", brief),
     onUpdate: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, briefs: ResearchBrief[]) => callback(briefs);
+      const handler = (_event: Electron.IpcRendererEvent, briefs: ResearchBrief[]) =>
+        callback(briefs);
       ipcRenderer.on("research:update", handler);
       return () => ipcRenderer.removeListener("research:update", handler);
     },
