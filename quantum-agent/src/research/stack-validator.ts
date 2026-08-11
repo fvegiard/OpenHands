@@ -107,7 +107,7 @@ export function detectPythonVersion(root: string): {
 function parsePyproject(root: string): string | null {
   try {
     const text = readFileSync(`${root}/pyproject.toml`, "utf8");
-    const m = text.match(/python\s*=\s*["']([^"']+)["']/);
+    const m = text.match(/requires-python\s*=\s*["']([^"']+)["']/);
     if (m) return m[1] ?? null;
   } catch {
     // ignore
@@ -160,7 +160,7 @@ export function detectShell(): { detected: string | null; rcFiles: string[] } {
     sh: [".profile"],
     dash: [".profile"],
     ksh: [".kshrc", ".profile"],
-    tcsh: [".tcashrc", ".cshrc"],
+    tcsh: [".tcshrc", ".cshrc"],
     csh: [".cshrc"],
     pwsh: ["$PROFILE"],
     powershell: ["$PROFILE"],

@@ -101,6 +101,16 @@ describe("stack-validator", () => {
       expect(result.rcFiles.length).toBeGreaterThan(0);
     });
 
+    it("detects tcsh rc files", () => {
+      vi.stubEnv("SHELL", "/bin/tcsh");
+      vi.stubEnv("HOME", join(tmpdir(), "fakehome"));
+      mkdirSync(join(tmpdir(), "fakehome", ".tcshrc"), { recursive: true });
+
+      const result = detectShell();
+      expect(result.detected).toBe("tcsh");
+      expect(result.rcFiles.some((f) => f.endsWith(".tcshrc"))).toBe(true);
+    });
+
     it("returns unknown when SHELL is missing", () => {
       vi.stubEnv("SHELL", undefined);
       vi.stubEnv("COMSPEC", undefined);
