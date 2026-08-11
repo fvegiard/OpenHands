@@ -55,16 +55,8 @@ function detectFromFile(path: string): string | null {
   }
 }
 
-function resolveInsideRoot(p: string, root: string = process.cwd()): string {
-  const absRoot = require("node:path").resolve(root);
-  const candidate = require("node:path").isAbsolute(p)
-    ? require("node:path").resolve(p)
-    : require("node:path").resolve(absRoot, p);
-  const rel = require("node:path").relative(absRoot, candidate);
-  if (rel.startsWith("..") && !candidate.startsWith("/tmp")) {
-    throw new Error(`path escapes project root: ${p}`);
-  }
-  return candidate;
+function resolveProjectRoot(root: string = "."): string {
+  return require("node:path").resolve(root);
 }
 
 const SHELL_RC_MAP: Record<string, string[]> = {
@@ -120,7 +112,7 @@ const _SHELL_COMMON_ERROR_PATTERNS: { regex: RegExp; hint: string }[] = [
 
 export function runFixNodeVersion(input: unknown): ToolResult {
   const args = FixNodeVersionInput.parse(input ?? {});
-  const root = resolveInsideRoot(args.root ?? ".");
+  const root = resolveProjectRoot(args.root ?? ".");
   const candidates = [
     { path: `${root}/.nvmrc`, label: ".nvmrc" },
     { path: `${root}/.node-version`, label: ".node-version" },
@@ -219,7 +211,7 @@ export function runFixNodeVersion(input: unknown): ToolResult {
 
 export function runFixPythonVersion(input: unknown): ToolResult {
   const args = FixPythonVersionInput.parse(input ?? {});
-  const root = resolveInsideRoot(args.root ?? ".");
+  const root = resolveProjectRoot(args.root ?? ".");
 
   let detected: string | null = null;
   let source = "not found";
@@ -453,7 +445,7 @@ export async function runLlmCorrection(input: unknown): Promise<ToolResult> {
         .slice(0, 5);
       for (const term of terms) {
         try {
-          const result = await runGrep({ pattern: term, path: "." });
+          const result = await runGrep({ pattern: term, path: "src" });
           const text = result.content[0]?.text ?? "";
           for (const line of text.split("\n").slice(0, 20)) {
             const m = line.match(/^(.+?):(\d+):\s*(.+)$/);
