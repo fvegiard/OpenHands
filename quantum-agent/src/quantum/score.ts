@@ -14,8 +14,14 @@ export interface ThinkingStep {
   score: number;
 }
 
-const MAX_ERRORS = 20;
+/**
+ * Maximum number of errors before the penalty saturates at 10/10.
+ */
+export const MAX_ERRORS = 20;
 
+/**
+ * Compute a delivery score from pipeline metrics.
+ */
 export function computeDeliveryScore(input: {
   codeCorrectness: number;
   testCoverage: number;
