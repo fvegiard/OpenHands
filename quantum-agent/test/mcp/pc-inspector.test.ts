@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  handleMessage,
   runCheckEnvironment,
   runDetectShell,
   runListProcesses,
@@ -140,6 +141,36 @@ describe("pc-inspector tools", () => {
         process.env.HOME = originalHome;
         process.env.SHELL = originalShell;
         rmSync(home, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("handleMessage tools/call", () => {
+    it("passes client arguments through params.arguments to the tool", async () => {
+      const outputs: string[] = [];
+      const origWrite = process.stdout.write;
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        if (typeof chunk === "string") outputs.push(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+
+      try {
+        await handleMessage(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "map_drive", arguments: { path: "/tmp", maxDepth: 1 } },
+          }),
+        );
+        const parsed = outputs.map((o) => JSON.parse(o));
+        const response = parsed.find((p) => p.id === 1);
+        expect(response).toBeDefined();
+        expect(response.result).toBeDefined();
+        const text = response.result.content[0].text;
+        expect(text).toContain("tmp");
+      } finally {
+        process.stdout.write = origWrite;
       }
     });
   });

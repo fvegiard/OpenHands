@@ -113,17 +113,22 @@ export function runSystemInfo(_input: unknown): ToolResult {
     free: string;
   }[] = [];
   try {
-    const result = execaSync("df", ["-h", "--output=source,size,used,avail,pcent,target"], {
-      encoding: "utf8",
-      reject: false,
-    });
+    let result: { stdout: string };
+    try {
+      result = execaSync("df", ["-h", "--output=source,size,used,avail,pcent,target"], {
+        encoding: "utf8",
+        reject: false,
+      });
+    } catch {
+      result = execaSync("df", ["-h"], { encoding: "utf8", reject: false });
+    }
     const lines = result.stdout.split("\n").slice(1);
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 6 && parts[0]?.startsWith("/dev/")) {
         diskUsage.push({
           filesystem: parts[0],
-          mountpoint: parts[5] ?? "unknown",
+          mountpoint: parts[parts.length - 1] ?? "unknown",
           total: parts[1] ?? "0",
           used: parts[2] ?? "0",
           free: parts[3] ?? "0",
@@ -162,7 +167,7 @@ export function runListProcesses(_input: unknown): ToolResult {
     const ss = execaSync("ss", ["-tlnp"], { encoding: "utf8", reject: false });
     const lines = ss.stdout.split("\n");
     for (const line of lines) {
-      const match = line.match(/\*:(\d+)\s+.*users:\(\("(.+?)",pid=(\d+)/);
+      const match = line.match(/(?:\[::\]|\*|[\d.a-fA-F]+):(\d+)\s+.*users:\(\("(.+?)",pid=(\d+)/);
       if (match) {
         const port = parseInt(match[1] ?? "0", 10);
         const pid = parseInt(match[3] ?? "0", 10);
@@ -365,7 +370,16 @@ export function runDetectShell(_input: unknown): ToolResult {
   const home = process.env.HOME ?? "";
 
   for (const rc of candidates) {
-    const full = rc.startsWith("$") ? (process.env[rc.slice(1)] ?? rc) : `${home}/${rc}`;
+    let full: string;
+    if (rc.startsWith("$PROFILE")) {
+      const pwshProfile =
+        process.env.PWsh_PROFILE ?? `${home}/Documents/PowerShell/Microsoft.PowerShell_profile.ps1`;
+      full = pwshProfile;
+    } else if (rc.startsWith("$")) {
+      full = process.env[rc.slice(1)] ?? rc;
+    } else {
+      full = `${home}/${rc}`;
+    }
     if (full) {
       try {
         if (existsSync(full)) {
@@ -474,7 +488,7 @@ function send(msg: JsonRpcResponse) {
   process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
 
-async function handleMessage(raw: string): Promise<void> {
+export async function handleMessage(raw: string): Promise<void> {
   let msg: JsonRpcRequest;
   try {
     msg = JSON.parse(raw);
@@ -515,7 +529,8 @@ async function handleMessage(raw: string): Promise<void> {
   }
 
   if (msg.method === "tools/call") {
-    const toolName = (msg.params as { name?: string })?.name;
+    const params = (msg.params as { name?: string; arguments?: unknown } | null | undefined) ?? {};
+    const toolName = params.name;
     const tool = TOOLS.find((t) => t.name === toolName);
     if (!tool || !toolName) {
       send({
@@ -529,7 +544,7 @@ async function handleMessage(raw: string): Promise<void> {
     const schema = SCHEMAS[toolName]!;
     let parsed: unknown;
     try {
-      parsed = schema.parse(msg.params ?? {});
+      parsed = schema.parse(params.arguments ?? {});
     } catch (err) {
       const message =
         err instanceof z.ZodError
