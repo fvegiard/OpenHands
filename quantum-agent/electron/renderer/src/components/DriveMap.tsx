@@ -63,14 +63,14 @@ function buildTree(nodes: DriveNode[]): DriveNode[] {
 
   for (const dir of dirs) {
     dir.children = files
-      .filter((f) => f.path.startsWith(dir.path + "/") || f.path.startsWith(dir.path + "\\"))
+      .filter((f) => f.path.startsWith(`${dir.path}/`) || f.path.startsWith(`${dir.path}\\`))
       .map((f) => ({ ...f, children: undefined }));
     root.push(dir);
   }
 
   for (const file of files) {
     const inDir = dirs.some(
-      (d) => file.path.startsWith(d.path + "/") || file.path.startsWith(d.path + "\\")
+      (d) => file.path.startsWith(`${d.path}/`) || file.path.startsWith(`${d.path}\\`)
     );
     if (!inDir) root.push(file);
   }
