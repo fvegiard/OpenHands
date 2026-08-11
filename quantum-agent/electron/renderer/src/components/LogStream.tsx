@@ -11,7 +11,7 @@ export default function LogStream() {
   const { entries, clear } = useLogs();
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // biome-ignore lint/useExhaustiveDependencies: entries.length triggers re-run when new log entries arrive
+  // biome-ignore lint: entries.length triggers re-run when new log entries arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [entries.length]);
