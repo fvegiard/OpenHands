@@ -71,9 +71,8 @@ export default function McpTools() {
         <div className="mcp-main">
           <div className="mcp-form">
             <label htmlFor="mcp-tool-args">
-              Tool: <code>{selected}</code>
+              <code>{selected}</code> — Arguments (JSON):
             </label>
-            <label htmlFor="mcp-tool-args">Arguments (JSON):</label>
             <textarea
               id="mcp-tool-args"
               value={args}

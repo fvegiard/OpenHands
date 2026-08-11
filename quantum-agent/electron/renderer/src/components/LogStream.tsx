@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useLogs } from "../hooks/useAgentIPC";
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -11,10 +11,9 @@ export default function LogStream() {
   const { entries, clear } = useLogs();
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const setBottomRef = useCallback((node: HTMLDivElement | null) => {
-    bottomRef.current = node;
-    node?.scrollIntoView({ behavior: "smooth" });
-  }, []);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [entries.length]);
 
   const formatTime = (ts: number) => new Date(ts).toLocaleTimeString("en-US", { hour12: false });
 
@@ -38,7 +37,7 @@ export default function LogStream() {
             <span className="log-text">{escapeHtml(entry.text)}</span>
           </div>
         ))}
-        <div ref={setBottomRef} />
+        <div ref={bottomRef} />
       </div>
     </div>
   );
