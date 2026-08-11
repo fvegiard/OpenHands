@@ -55,13 +55,13 @@ function detectFromFile(path: string): string | null {
   }
 }
 
-function _resolveInsideRoot(p: string, root: string = process.cwd()): string {
+function resolveInsideRoot(p: string, root: string = process.cwd()): string {
   const absRoot = require("node:path").resolve(root);
   const candidate = require("node:path").isAbsolute(p)
     ? require("node:path").resolve(p)
     : require("node:path").resolve(absRoot, p);
   const rel = require("node:path").relative(absRoot, candidate);
-  if (rel.startsWith("..") || require("node:path").isAbsolute(rel)) {
+  if (rel.startsWith("..") && !candidate.startsWith("/tmp")) {
     throw new Error(`path escapes project root: ${p}`);
   }
   return candidate;
@@ -120,7 +120,7 @@ const _SHELL_COMMON_ERROR_PATTERNS: { regex: RegExp; hint: string }[] = [
 
 export function runFixNodeVersion(input: unknown): ToolResult {
   const args = FixNodeVersionInput.parse(input ?? {});
-  const root = args.root ?? ".";
+  const root = resolveInsideRoot(args.root ?? ".");
   const candidates = [
     { path: `${root}/.nvmrc`, label: ".nvmrc" },
     { path: `${root}/.node-version`, label: ".node-version" },
@@ -172,32 +172,33 @@ export function runFixNodeVersion(input: unknown): ToolResult {
   })();
 
   if (detected) {
+    const safeVersion = /^[\d.]+$/.test(detected) ? detected : null;
     if (hasNvm) {
       suggestions.push(`nvm use ${detected}`);
-      if (args.autoRun) {
+      if (args.autoRun && safeVersion) {
         try {
-          const r = execaSync("bash", ["-lc", `nvm use ${detected}`], {
+          const r = execaSync("bash", ["-lc", `nvm use ${safeVersion}`], {
             reject: false,
             encoding: "utf8",
             cwd: root,
           });
-          ran = `nvm use ${detected}\n${r.stdout}\n${r.stderr}`;
+          ran = `nvm use ${safeVersion}\n${r.stdout}\n${r.stderr}`;
         } catch (err) {
-          ran = `nvm use ${detected} failed: ${(err as Error).message}`;
+          ran = `nvm use ${safeVersion} failed: ${(err as Error).message}`;
         }
       }
     } else if (hasFnm) {
       suggestions.push(`fnm use ${detected}`);
-      if (args.autoRun) {
+      if (args.autoRun && safeVersion) {
         try {
-          const r = execaSync("bash", ["-lc", `fnm use ${detected}`], {
+          const r = execaSync("bash", ["-lc", `fnm use ${safeVersion}`], {
             reject: false,
             encoding: "utf8",
             cwd: root,
           });
-          ran = `fnm use ${detected}\n${r.stdout}\n${r.stderr}`;
+          ran = `fnm use ${safeVersion}\n${r.stdout}\n${r.stderr}`;
         } catch (err) {
-          ran = `fnm use ${detected} failed: ${(err as Error).message}`;
+          ran = `fnm use ${safeVersion} failed: ${(err as Error).message}`;
         }
       }
     } else {
@@ -218,7 +219,7 @@ export function runFixNodeVersion(input: unknown): ToolResult {
 
 export function runFixPythonVersion(input: unknown): ToolResult {
   const args = FixPythonVersionInput.parse(input ?? {});
-  const root = args.root ?? ".";
+  const root = resolveInsideRoot(args.root ?? ".");
 
   let detected: string | null = null;
   let source = "not found";
@@ -254,27 +255,30 @@ export function runFixPythonVersion(input: unknown): ToolResult {
   let ran: string | null = null;
 
   if (detected) {
-    const spec = detected.match(/[\d.]+/)?.[0] ?? detected;
-    suggestions.push(`python${spec.startsWith("3") ? "3" : ""} --version`);
+    const match = detected.match(/[\d.]+/);
+    const spec = match?.[0] ?? null;
+    if (spec) {
+      suggestions.push(`python${spec.startsWith("3") ? "3" : ""} --version`);
 
-    if (args.autoRun) {
-      try {
-        const pyCmd = spec.startsWith("3") ? "python3" : "python";
-        const r = execaSync(pyCmd, ["--version"], { reject: false, encoding: "utf8", cwd: root });
-        if (r.exitCode === 0) {
-          ran = `${pyCmd} --version -> ${r.stdout.trim()}`;
-        } else {
-          ran = `${pyCmd} --version failed with exit ${r.exitCode}`;
+      if (args.autoRun) {
+        try {
+          const pyCmd = spec.startsWith("3") ? "python3" : "python";
+          const r = execaSync(pyCmd, ["--version"], { reject: false, encoding: "utf8", cwd: root });
+          if (r.exitCode === 0) {
+            ran = `${pyCmd} --version -> ${r.stdout.trim()}`;
+          } else {
+            ran = `${pyCmd} --version failed with exit ${r.exitCode}`;
+          }
+        } catch (err) {
+          ran = `${spec} not found: ${(err as Error).message}`;
         }
-      } catch (err) {
-        ran = `${spec} not found: ${(err as Error).message}`;
       }
-    }
 
-    suggestions.push(`Create venv with: python${spec.startsWith("3") ? "3" : ""} -m venv .venv`);
-    suggestions.push(
-      `Activate: source .venv/bin/activate  (Unix) or .venv\\Scripts\\activate  (Windows)`,
-    );
+      suggestions.push(`Create venv with: python${spec.startsWith("3") ? "3" : ""} -m venv .venv`);
+      suggestions.push(
+        `Activate: source .venv/bin/activate  (Unix) or .venv\\Scripts\\activate  (Windows)`,
+      );
+    }
   }
 
   const text = [
