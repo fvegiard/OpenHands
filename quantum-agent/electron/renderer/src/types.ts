@@ -1,26 +1,34 @@
 import type {
   AgentState,
-  LogEntry,
-  ErrorEntry,
-  StackFrame,
-  DriveNode,
   CdpScreenshot,
-  ResearchBrief,
   CorrectionProposal,
+  DriveNode,
+  ErrorEntry,
+  LogEntry,
+  ResearchBrief,
+  StackFrame,
 } from "../preload.ts";
 
 export type {
   AgentState,
-  LogEntry,
-  ErrorEntry,
-  StackFrame,
-  DriveNode,
   CdpScreenshot,
-  ResearchBrief,
   CorrectionProposal,
+  DriveNode,
+  ErrorEntry,
+  LogEntry,
+  ResearchBrief,
+  StackFrame,
 };
 
-export type TabId = "logs" | "errors" | "stacks" | "drive" | "cdp" | "research" | "corrections" | "mcp";
+export type TabId =
+  | "logs"
+  | "errors"
+  | "stacks"
+  | "drive"
+  | "cdp"
+  | "research"
+  | "corrections"
+  | "mcp";
 
 export interface TabDef {
   id: TabId;

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useLogs } from "../hooks/useAgentIPC";
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -13,20 +13,25 @@ export default function LogStream() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries.length]);
+  }, []);
 
-  const formatTime = (ts: number) =>
-    new Date(ts).toLocaleTimeString("en-US", { hour12: false });
+  const formatTime = (ts: number) => new Date(ts).toLocaleTimeString("en-US", { hour12: false });
 
   return (
     <div className="panel">
       <div className="panel-header">
         <h2>📋 Real-time Logs</h2>
-        <button onClick={clear} className="danger">Clear</button>
+        <button type="button" onClick={clear} className="danger">
+          Clear
+        </button>
       </div>
       <div className="log-stream">
         {entries.map((entry) => (
-          <div key={entry.id} className="log-line" style={{ color: LEVEL_COLORS[entry.level] || "inherit" }}>
+          <div
+            key={entry.id}
+            className="log-line"
+            style={{ color: LEVEL_COLORS[entry.level] || "inherit" }}
+          >
             <span className="log-time">[{formatTime(entry.timestamp)}]</span>
             <span className="log-level">[{entry.level.toUpperCase()}]</span>
             <span className="log-text">{escapeHtml(entry.text)}</span>
@@ -39,8 +44,5 @@ export default function LogStream() {
 }
 
 function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

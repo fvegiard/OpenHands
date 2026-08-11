@@ -1,9 +1,9 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import * as pty from "node-pty";
-import { spawn, type ChildProcess } from "node:child_process";
-import * as path from "node:path";
-import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -195,15 +195,13 @@ function createWindow(): void {
 async function ensureServerRunning(): Promise<number> {
   if (serverProcess && serverProcess.exitCode === null) return 8765;
   const serverBin = path.join(PROJECT_ROOT, "node_modules", ".bin", "tsx");
-  const _serverEntry = path.join(PROJECT_ROOT, "src", "cli.ts");
   if (!fs.existsSync(serverBin)) {
     throw new Error("tsx not found — run pnpm install first");
   }
-  serverProcess = spawn(
-    process.execPath,
-    [serverBin, "serve", "-p", "8765"],
-    { cwd: PROJECT_ROOT, stdio: ["pipe", "pipe", "pipe"] }
-  );
+  serverProcess = spawn(process.execPath, [serverBin, "serve", "-p", "8765"], {
+    cwd: PROJECT_ROOT,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
   serverProcess.stdout?.on("data", (d: Buffer) => addLog("stdout", d.toString()));
   serverProcess.stderr?.on("data", (d: Buffer) => addLog("stderr", d.toString()));
   await new Promise<void>((resolve) => {
@@ -306,9 +304,7 @@ ipcMain.handle("mcp:call-tool", async (_event, tool: string, args: Record<string
 
 ipcMain.handle("file:open", async (_event, filePath: string) => {
   try {
-    const fullPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(PROJECT_ROOT, filePath);
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(PROJECT_ROOT, filePath);
     await shell.openPath(fullPath);
     return { ok: true };
   } catch (err) {
@@ -318,9 +314,7 @@ ipcMain.handle("file:open", async (_event, filePath: string) => {
 
 ipcMain.handle("file:open-in-editor", async (_event, filePath: string, line?: number) => {
   try {
-    const fullPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(PROJECT_ROOT, filePath);
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(PROJECT_ROOT, filePath);
     const editor = process.env.EDITOR || process.env.VISUAL || "code";
     const args = line ? [fullPath, `--goto`, `${fullPath}:${line}`] : [fullPath];
     const cp = spawn(editor, args, { cwd: PROJECT_ROOT, detached: true });
@@ -361,7 +355,11 @@ ipcMain.handle("drive:get", async () => {
             size: stat.size,
           };
         } catch {
-          return { name: d.name, path: full, type: d.isDirectory() ? ("dir" as const) : ("file" as const) };
+          return {
+            name: d.name,
+            path: full,
+            type: d.isDirectory() ? ("dir" as const) : ("file" as const),
+          };
         }
       });
     driveMap.length = 0;
@@ -376,13 +374,17 @@ ipcMain.handle("cdp:screenshot", async () => {
   return screenshots.slice(-20);
 });
 
-ipcMain.handle("cdp:add-screenshot", async (_event, screenshot: Omit<CdpScreenshot, "id" | "timestamp">) => {
-  const entry: CdpScreenshot = { id: uid(), timestamp: Date.now(), ...screenshot };
-  screenshots.push(entry);
-  if (screenshots.length > MAX_SCREENSHOTS) screenshots.splice(0, screenshots.length - MAX_SCREENSHOTS);
-  mainWindow?.webContents.send("cdp:screenshot:new", entry);
-  return entry;
-});
+ipcMain.handle(
+  "cdp:add-screenshot",
+  async (_event, screenshot: Omit<CdpScreenshot, "id" | "timestamp">) => {
+    const entry: CdpScreenshot = { id: uid(), timestamp: Date.now(), ...screenshot };
+    screenshots.push(entry);
+    if (screenshots.length > MAX_SCREENSHOTS)
+      screenshots.splice(0, screenshots.length - MAX_SCREENSHOTS);
+    mainWindow?.webContents.send("cdp:screenshot:new", entry);
+    return entry;
+  },
+);
 
 ipcMain.handle("research:get", () => researchBriefs.slice(-50));
 ipcMain.handle("research:add", async (_event, brief: Omit<ResearchBrief, "id" | "timestamp">) => {
@@ -395,14 +397,17 @@ ipcMain.handle("research:add", async (_event, brief: Omit<ResearchBrief, "id" | 
 });
 
 ipcMain.handle("corrections:get", () => corrections.slice(-50));
-ipcMain.handle("corrections:add", async (_event, correction: Omit<CorrectionProposal, "id" | "timestamp">) => {
-  const entry: CorrectionProposal = { id: uid(), timestamp: Date.now(), ...correction };
-  corrections.push(entry);
-  if (corrections.length > MAX_CORRECTIONS)
-    corrections.splice(0, corrections.length - MAX_CORRECTIONS);
-  mainWindow?.webContents.send("corrections:update", corrections);
-  return entry;
-});
+ipcMain.handle(
+  "corrections:add",
+  async (_event, correction: Omit<CorrectionProposal, "id" | "timestamp">) => {
+    const entry: CorrectionProposal = { id: uid(), timestamp: Date.now(), ...correction };
+    corrections.push(entry);
+    if (corrections.length > MAX_CORRECTIONS)
+      corrections.splice(0, corrections.length - MAX_CORRECTIONS);
+    mainWindow?.webContents.send("corrections:update", corrections);
+    return entry;
+  },
+);
 
 ipcMain.handle("corrections:apply", async (_event, id: string) => {
   const idx = corrections.findIndex((c) => c.id === id);
@@ -417,6 +422,17 @@ ipcMain.handle("corrections:apply", async (_event, id: string) => {
     addLog("system", `Applied correction: ${c.type} — ${c.message}`);
   }
   return { ok: true, applied: c };
+});
+
+ipcMain.handle("corrections:dismiss", async (_event, id: string) => {
+  const idx = corrections.findIndex((c) => c.id === id);
+  if (idx === -1) return { ok: false, error: "not found" };
+  const c = corrections[idx];
+  corrections.splice(idx, 1);
+  if (mainWindow?.webContents) {
+    mainWindow.webContents.send("corrections:update", corrections);
+  }
+  return { ok: true, dismissed: c };
 });
 
 app.whenReady().then(() => {

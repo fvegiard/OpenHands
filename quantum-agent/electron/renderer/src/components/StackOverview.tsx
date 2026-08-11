@@ -14,19 +14,21 @@ export default function StackOverview() {
     <div className="panel">
       <div className="panel-header">
         <h2>📚 Stack Overview</h2>
-        <button onClick={clear} className="danger">Clear</button>
+        <button type="button" onClick={clear} className="danger">
+          Clear
+        </button>
       </div>
       <div className="stack-overview">
-        {frames.length === 0 && (
-          <div className="empty-state">No stack frames captured</div>
-        )}
+        {frames.length === 0 && <div className="empty-state">No stack frames captured</div>}
         {Object.entries(grouped).map(([file, fileFrames]) => (
           <div key={file} className="stack-file">
             <div className="stack-file-header">{file}</div>
-            {fileFrames.map((frame, i) => (
-              <div key={i} className="stack-frame">
+            {fileFrames.map((frame) => (
+              <div key={`${frame.function}-${frame.line}-${frame.column}`} className="stack-frame">
                 <span className="stack-fn">{frame.function}</span>
-                <span className="stack-loc">line {frame.line}:{frame.column}</span>
+                <span className="stack-loc">
+                  line {frame.line}:{frame.column}
+                </span>
                 {frame.context && <pre className="stack-ctx">{frame.context}</pre>}
               </div>
             ))}

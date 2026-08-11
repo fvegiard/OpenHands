@@ -76,7 +76,10 @@ export interface QuantumAPI {
     onStatus(callback: (status: AgentState) => void): () => void;
   };
   mcp: {
-    callTool(tool: string, args: Record<string, unknown>): Promise<{
+    callTool(
+      tool: string,
+      args: Record<string, unknown>,
+    ): Promise<{
       ok: boolean;
       data?: unknown;
       error?: string;
@@ -117,6 +120,7 @@ export interface QuantumAPI {
     get(): Promise<CorrectionProposal[]>;
     add(correction: Omit<CorrectionProposal, "id" | "timestamp">): Promise<CorrectionProposal>;
     apply(id: string): Promise<{ ok: boolean; applied?: CorrectionProposal; error?: string }>;
+    dismiss(id: string): Promise<{ ok: boolean; dismissed?: CorrectionProposal; error?: string }>;
     onUpdate(callback: (corrections: CorrectionProposal[]) => void): () => void;
   };
 }
@@ -173,7 +177,8 @@ const api: QuantumAPI = {
     getScreenshots: () => ipcRenderer.invoke("cdp:screenshot"),
     addScreenshot: (screenshot) => ipcRenderer.invoke("cdp:add-screenshot", screenshot),
     onNewScreenshot: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, screenshot: CdpScreenshot) => callback(screenshot);
+      const handler = (_event: Electron.IpcRendererEvent, screenshot: CdpScreenshot) =>
+        callback(screenshot);
       ipcRenderer.on("cdp:screenshot:new", handler);
       return () => ipcRenderer.removeListener("cdp:screenshot:new", handler);
     },
@@ -182,7 +187,8 @@ const api: QuantumAPI = {
     get: () => ipcRenderer.invoke("research:get"),
     add: (brief) => ipcRenderer.invoke("research:add", brief),
     onUpdate: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, briefs: ResearchBrief[]) => callback(briefs);
+      const handler = (_event: Electron.IpcRendererEvent, briefs: ResearchBrief[]) =>
+        callback(briefs);
       ipcRenderer.on("research:update", handler);
       return () => ipcRenderer.removeListener("research:update", handler);
     },
@@ -191,6 +197,7 @@ const api: QuantumAPI = {
     get: () => ipcRenderer.invoke("corrections:get"),
     add: (correction) => ipcRenderer.invoke("corrections:add", correction),
     apply: (id) => ipcRenderer.invoke("corrections:apply", id),
+    dismiss: (id) => ipcRenderer.invoke("corrections:dismiss", id),
     onUpdate: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, corrections: CorrectionProposal[]) =>
         callback(corrections);

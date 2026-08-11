@@ -32,7 +32,9 @@ export default function McpTools() {
       try {
         parsedArgs = JSON.parse(args);
       } catch (parseErr) {
-        setResult(`Invalid JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+        setResult(
+          `Invalid JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+        );
         setLoading(false);
         return;
       }
@@ -57,6 +59,7 @@ export default function McpTools() {
           {MCP_TOOLS.map((tool) => (
             <button
               key={tool.name}
+              type="button"
               className={`mcp-tool-btn ${selected === tool.name ? "mcp-active" : ""}`}
               onClick={() => setSelected(tool.name)}
             >
@@ -67,21 +70,24 @@ export default function McpTools() {
         </div>
         <div className="mcp-main">
           <div className="mcp-form">
-            <label>Tool: <code>{selected}</code></label>
-            <label>Arguments (JSON):</label>
+            <label htmlFor="mcp-tool-select">
+              Tool: <code>{selected}</code>
+            </label>
+            <label htmlFor="mcp-tool-args">Arguments (JSON):</label>
             <textarea
+              id="mcp-tool-args"
               value={args}
               onChange={(e) => setArgs(e.target.value)}
               rows={6}
             />
-            <button onClick={handleCall} disabled={loading} className="primary">
+            <button type="button" onClick={handleCall} disabled={loading} className="primary">
               {loading ? "Calling..." : "Call Tool"}
             </button>
           </div>
           {result && (
             <div className="mcp-result">
-              <label>Result:</label>
-              <pre>{result}</pre>
+              <label htmlFor="mcp-tool-result">Result:</label>
+              <pre id="mcp-tool-result">{result}</pre>
             </div>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useCdpScreenshots } from "../hooks/useAgentIPC";
 
 export default function CdpScreenshots() {
@@ -13,18 +14,17 @@ export default function CdpScreenshots() {
       </div>
       <div className="cdp-layout">
         <div className="cdp-list">
-          {items.length === 0 && (
-            <div className="empty-state">No screenshots yet</div>
-          )}
+          {items.length === 0 && <div className="empty-state">No screenshots yet</div>}
           {items.map((s) => (
-            <div
+            <button
               key={s.id}
+              type="button"
               className={`cdp-thumb ${selected === s.id ? "cdp-selected" : ""}`}
               onClick={() => setSelected(s.id)}
             >
               <img src={s.dataUrl} alt={s.title || "screenshot"} />
               <span className="cdp-thumb-title">{s.title || s.url || `#${s.id.slice(0, 8)}`}</span>
-            </div>
+            </button>
           ))}
         </div>
         <div className="cdp-viewer">

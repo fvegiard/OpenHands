@@ -1,14 +1,14 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import AgentStatus from "./components/AgentStatus";
-import TabNav from "./components/TabNav";
-import LogStream from "./components/LogStream";
-import ErrorPanel from "./components/ErrorPanel";
-import StackOverview from "./components/StackOverview";
-import DriveMap from "./components/DriveMap";
 import CdpScreenshots from "./components/CdpScreenshots";
-import ResearchBriefs from "./components/ResearchBriefs";
 import CorrectionProposals from "./components/CorrectionProposals";
+import DriveMap from "./components/DriveMap";
+import ErrorPanel from "./components/ErrorPanel";
+import LogStream from "./components/LogStream";
 import McpTools from "./components/McpTools";
+import ResearchBriefs from "./components/ResearchBriefs";
+import StackOverview from "./components/StackOverview";
+import TabNav from "./components/TabNav";
 import type { TabId } from "./types";
 
 export default function App() {
@@ -47,10 +47,15 @@ export default function App() {
             disabled={isStarting}
             className="prompt-input"
           />
-          <button onClick={handleStart} disabled={isStarting || !prompt.trim()} className="primary">
+          <button
+            type="button"
+            onClick={handleStart}
+            disabled={isStarting || !prompt.trim()}
+            className="primary"
+          >
             {isStarting ? "Starting..." : "▶ Start"}
           </button>
-          <button onClick={handleStop} className="danger">
+          <button type="button" onClick={handleStop} className="danger">
             ■ Stop
           </button>
         </div>
