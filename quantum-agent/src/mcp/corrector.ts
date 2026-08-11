@@ -56,7 +56,15 @@ function detectFromFile(path: string): string | null {
 }
 
 function resolveProjectRoot(root: string = "."): string {
-  return require("node:path").resolve(root);
+  const absRoot = require("node:path").resolve(process.cwd());
+  const candidate = require("node:path").isAbsolute(root)
+    ? require("node:path").resolve(root)
+    : require("node:path").resolve(absRoot, root);
+  const rel = require("node:path").relative(absRoot, candidate);
+  if (rel.startsWith("..") && !candidate.startsWith("/tmp")) {
+    throw new Error(`path escapes project root: ${root}`);
+  }
+  return candidate;
 }
 
 const SHELL_RC_MAP: Record<string, string[]> = {
@@ -445,7 +453,7 @@ export async function runLlmCorrection(input: unknown): Promise<ToolResult> {
         .slice(0, 5);
       for (const term of terms) {
         try {
-          const result = await runGrep({ pattern: term, path: "src" });
+          const result = await runGrep({ pattern: term, path: "." });
           const text = result.content[0]?.text ?? "";
           for (const line of text.split("\n").slice(0, 20)) {
             const m = line.match(/^(.+?):(\d+):\s*(.+)$/);
