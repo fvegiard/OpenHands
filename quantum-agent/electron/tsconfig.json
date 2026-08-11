@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "outDir": "../out/electron",
+    "outDir": "out/electron",
     "rootDir": ".",
     "types": ["node", "electron"]
   },

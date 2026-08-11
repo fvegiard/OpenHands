@@ -5,7 +5,8 @@ import type { DriveNode } from "../types";
 function TreeNode({ node, depth = 0 }: { node: DriveNode; depth?: number }) {
   const [expanded, setExpanded] = useState(depth < 1);
   const isDir = node.type === "dir";
-  const hasChildren = isDir && node.children && node.children.length > 0;
+  const children = node.children ?? [];
+  const hasChildren = isDir && children.length > 0;
 
   const handleOpen = () => {
     if (isDir) setExpanded(!expanded);
@@ -26,9 +27,15 @@ function TreeNode({ node, depth = 0 }: { node: DriveNode; depth?: number }) {
   return (
     <div className="drive-tree-node">
       <div className="drive-tree-row" style={{ paddingLeft: depth * 16 + 4 }}>
-        <button type="button" className="drive-toggle" onClick={() => setExpanded(!expanded)}>
-          {isDir ? (expanded ? "▼" : "▶") : "  "}
-        </button>
+        {isDir ? (
+          <button type="button" className="drive-toggle" onClick={() => setExpanded(!expanded)}>
+            {expanded ? "▼" : "▶"}
+          </button>
+        ) : (
+          <span className="drive-toggle" aria-hidden="true">
+            {" "}
+          </span>
+        )}
         <span className={`drive-icon ${isDir ? "dir-icon" : "file-icon"}`}>
           {isDir ? "📁" : "📄"}
         </span>
@@ -44,7 +51,7 @@ function TreeNode({ node, depth = 0 }: { node: DriveNode; depth?: number }) {
       </div>
       {expanded && hasChildren && (
         <div className="drive-children">
-          {node.children!.map((child) => (
+          {children.map((child) => (
             <TreeNode key={child.path} node={child} depth={depth + 1} />
           ))}
         </div>

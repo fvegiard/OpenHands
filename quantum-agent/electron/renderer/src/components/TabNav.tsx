@@ -10,8 +10,8 @@ export default function TabNav({ active, onChange }: Props) {
     <nav className="tab-nav">
       {TABS.map((tab) => (
         <button
-          key={tab.id}
           type="button"
+          key={tab.id}
           className={`tab-btn ${active === tab.id ? "tab-active" : ""}`}
           onClick={() => onChange(tab.id)}
         >

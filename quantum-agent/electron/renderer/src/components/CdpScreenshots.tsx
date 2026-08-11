@@ -17,8 +17,8 @@ export default function CdpScreenshots() {
           {items.length === 0 && <div className="empty-state">No screenshots yet</div>}
           {items.map((s) => (
             <button
-              key={s.id}
               type="button"
+              key={s.id}
               className={`cdp-thumb ${selected === s.id ? "cdp-selected" : ""}`}
               onClick={() => setSelected(s.id)}
             >

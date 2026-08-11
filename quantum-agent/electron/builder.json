@@ -8,8 +8,8 @@
   },
   "files": [
     "out/renderer/**/*",
-    "../out/electron/main.js",
-    "../out/electron/preload.js",
+    "out/electron/main.js",
+    "out/electron/preload.js",
     "node_modules/**/*"
   ],
   "mac": {

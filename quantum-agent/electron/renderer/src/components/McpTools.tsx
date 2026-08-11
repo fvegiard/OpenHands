@@ -58,8 +58,8 @@ export default function McpTools() {
         <div className="mcp-sidebar">
           {MCP_TOOLS.map((tool) => (
             <button
-              key={tool.name}
               type="button"
+              key={tool.name}
               className={`mcp-tool-btn ${selected === tool.name ? "mcp-active" : ""}`}
               onClick={() => setSelected(tool.name)}
             >
@@ -70,12 +70,12 @@ export default function McpTools() {
         </div>
         <div className="mcp-main">
           <div className="mcp-form">
-            <label htmlFor="mcp-tool-select">
+            <div>
               Tool: <code>{selected}</code>
-            </label>
-            <label htmlFor="mcp-tool-args">Arguments (JSON):</label>
+            </div>
+            <label htmlFor="mcp-arguments">Arguments (JSON):</label>
             <textarea
-              id="mcp-tool-args"
+              id="mcp-arguments"
               value={args}
               onChange={(e) => setArgs(e.target.value)}
               rows={6}
@@ -86,8 +86,8 @@ export default function McpTools() {
           </div>
           {result && (
             <div className="mcp-result">
-              <label htmlFor="mcp-tool-result">Result:</label>
-              <pre id="mcp-tool-result">{result}</pre>
+              <div>Result:</div>
+              <pre>{result}</pre>
             </div>
           )}
         </div>

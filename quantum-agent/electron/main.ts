@@ -7,7 +7,9 @@ import * as pty from "node-pty";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, "..");
+const PROJECT_ROOT = __dirname.endsWith(path.join("electron", "out", "electron"))
+  ? path.resolve(__dirname, "../../..")
+  : path.resolve(__dirname, "..");
 
 let mainWindow: BrowserWindow | null = null;
 let agentPty: pty.IPty | null = null;
@@ -184,7 +186,11 @@ function createWindow(): void {
     mainWindow.loadURL("http://localhost:5173");
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadFile(path.join(__dirname, "out/renderer/index.html"));
+    const rendererIndex = path.join(__dirname, "../renderer/index.html");
+    if (!fs.existsSync(rendererIndex)) {
+      throw new Error(`Renderer entry not found: ${rendererIndex}`);
+    }
+    mainWindow.loadFile(rendererIndex);
   }
 
   mainWindow.on("closed", () => {

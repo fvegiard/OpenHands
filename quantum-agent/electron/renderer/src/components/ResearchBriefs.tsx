@@ -23,7 +23,7 @@ export default function ResearchBriefs() {
             {brief.sources.length > 0 && (
               <div className="research-sources">
                 {brief.sources.map((s) => (
-                  <div key={s.url} className="research-source">
+                  <div key={`${s.url}-${s.title}`} className="research-source">
                     <a href={s.url} target="_blank" rel="noopener noreferrer">
                       {s.title}
                     </a>

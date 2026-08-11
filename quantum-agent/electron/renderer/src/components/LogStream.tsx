@@ -13,7 +13,7 @@ export default function LogStream() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
+  });
 
   const formatTime = (ts: number) => new Date(ts).toLocaleTimeString("en-US", { hour12: false });
 

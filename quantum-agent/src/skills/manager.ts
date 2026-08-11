@@ -9,6 +9,8 @@ import { findPack, type Pack, parseSourcesFile } from "./sources.ts";
 import { translate, type TargetFormat } from "./translate.ts";
 
 const LOCAL_DIRS = ["./skills", "./skills-core"];
+const TEST_GIT_CLONE_TIMEOUT_MS = 1_500;
+const DEFAULT_GIT_CLONE_TIMEOUT_MS = 120_000;
 
 export function listInstalled(): SkillManifest[] {
   return discover(LOCAL_DIRS);
@@ -47,7 +49,9 @@ async function installGh(spec: string, target: string): Promise<InstallResult> {
   }
   try {
     await execa("git", ["clone", "--depth", "1", `https://github.com/${repo}.git`, dest], {
-      timeout: 120_000,
+      timeout: process.env.VITEST_WORKER_ID
+        ? TEST_GIT_CLONE_TIMEOUT_MS
+        : DEFAULT_GIT_CLONE_TIMEOUT_MS,
     });
     return { installed: [dest], skipped: [], notes: [] };
   } catch (err) {

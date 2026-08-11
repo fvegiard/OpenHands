@@ -39,6 +39,9 @@ export default function App() {
         </div>
         <div className="header-center">
           <input
+            id="agent-prompt"
+            name="agent-prompt"
+            aria-label="Agent prompt"
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}

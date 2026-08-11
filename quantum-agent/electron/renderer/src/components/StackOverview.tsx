@@ -24,7 +24,10 @@ export default function StackOverview() {
           <div key={file} className="stack-file">
             <div className="stack-file-header">{file}</div>
             {fileFrames.map((frame) => (
-              <div key={`${frame.function}-${frame.line}-${frame.column}`} className="stack-frame">
+              <div
+                key={`${frame.file}:${frame.line}:${frame.column}:${frame.function}`}
+                className="stack-frame"
+              >
                 <span className="stack-fn">{frame.function}</span>
                 <span className="stack-loc">
                   line {frame.line}:{frame.column}

@@ -4,14 +4,14 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
-  root: ".",
+  root: path.resolve(__dirname, "renderer"),
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(__dirname, "renderer/src"),
     },
   },
   build: {
-    outDir: "out/renderer",
+    outDir: path.resolve(__dirname, "out/renderer"),
     emptyOutDir: true,
   },
   server: {
