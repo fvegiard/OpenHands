@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as pty from "node-pty";
 import { fileURLToPath } from "node:url";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
+import * as pty from "node-pty";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,11 +198,10 @@ async function ensureServerRunning(): Promise<number> {
   if (!fs.existsSync(serverBin)) {
     throw new Error("tsx not found — run pnpm install first");
   }
-  serverProcess = spawn(
-    process.execPath,
-    [serverBin, "serve", "-p", "8765"],
-    { cwd: PROJECT_ROOT, stdio: ["pipe", "pipe", "pipe"] }
-  );
+  serverProcess = spawn(process.execPath, [serverBin, "serve", "-p", "8765"], {
+    cwd: PROJECT_ROOT,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
   serverProcess.stdout?.on("data", (d: Buffer) => addLog("stdout", d.toString()));
   serverProcess.stderr?.on("data", (d: Buffer) => addLog("stderr", d.toString()));
   await new Promise<void>((resolve) => {
@@ -305,9 +304,7 @@ ipcMain.handle("mcp:call-tool", async (_event, tool: string, args: Record<string
 
 ipcMain.handle("file:open", async (_event, filePath: string) => {
   try {
-    const fullPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(PROJECT_ROOT, filePath);
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(PROJECT_ROOT, filePath);
     await shell.openPath(fullPath);
     return { ok: true };
   } catch (err) {
@@ -317,9 +314,7 @@ ipcMain.handle("file:open", async (_event, filePath: string) => {
 
 ipcMain.handle("file:open-in-editor", async (_event, filePath: string, line?: number) => {
   try {
-    const fullPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(PROJECT_ROOT, filePath);
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(PROJECT_ROOT, filePath);
     const editor = process.env.EDITOR || process.env.VISUAL || "code";
     const args = line ? [fullPath, `--goto`, `${fullPath}:${line}`] : [fullPath];
     const cp = spawn(editor, args, { cwd: PROJECT_ROOT, detached: true });
@@ -360,7 +355,11 @@ ipcMain.handle("drive:get", async () => {
             size: stat.size,
           };
         } catch {
-          return { name: d.name, path: full, type: d.isDirectory() ? ("dir" as const) : ("file" as const) };
+          return {
+            name: d.name,
+            path: full,
+            type: d.isDirectory() ? ("dir" as const) : ("file" as const),
+          };
         }
       });
     driveMap.length = 0;
