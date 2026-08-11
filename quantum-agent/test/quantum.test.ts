@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { classify } from "../src/quantum/intent.ts";
 import { interfere } from "../src/quantum/interfere.ts";
+import { runQuantum } from "../src/quantum/loop.ts";
 import { measure } from "../src/quantum/measure.ts";
+import { runSequentialThinking } from "../src/quantum/score.ts";
 import { prepare } from "../src/quantum/superpose.ts";
 import { contrarianHypothesis, shouldTunnel } from "../src/quantum/tunnel.ts";
 
@@ -53,5 +55,40 @@ describe("tunneling", () => {
   it("contrarian hypothesis prompt is non-trivial", () => {
     const text = contrarianHypothesis("use postgres");
     expect(text).toMatch(/opposite/i);
+  });
+});
+
+describe("sequential-thinking injection", () => {
+  it("runs quantum loop with thinking steps on blackboard", async () => {
+    const outcomes: Record<string, { conclusion: string; score?: number }> = {
+      "b0-orchestrator": { conclusion: "use postgres", score: 7 },
+      "b1-explorer": { conclusion: "use postgres too", score: 5 },
+      "b2-coder": { conclusion: "use postgres as well", score: 6 },
+    };
+
+    const result = await runQuantum("design a database schema", async (h) => {
+      const out = outcomes[h.branch]!;
+      return { branch: h.branch, agent: h.agent, conclusion: out.conclusion, score: out.score };
+    });
+
+    expect(result.routing).toBeDefined();
+    expect(result.scored.length).toBe(3);
+    expect(result.measurement.winner).not.toBeNull();
+    expect(["b0-orchestrator", "b1-explorer", "b2-coder"]).toContain(
+      result.measurement.winner?.branch,
+    );
+  });
+
+  it("produces a thinking step for each branch", async () => {
+    const thoughts: string[] = [];
+    await runQuantum("fix the login bug", async (h) => {
+      return { branch: h.branch, agent: h.agent, conclusion: "fixed", score: 8 };
+    });
+    const branches = ["b0-coder", "b1-explorer", "b2-reviewer"];
+    for (const branch of branches) {
+      const thought = runSequentialThinking("fix the login bug", branch);
+      thoughts.push(thought.options[0] ?? "");
+    }
+    expect(thoughts.length).toBe(3);
   });
 });
