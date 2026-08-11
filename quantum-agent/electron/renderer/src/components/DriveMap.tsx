@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useDrive } from "../hooks/useAgentIPC";
 import type { DriveNode } from "../types";
 
@@ -67,7 +67,14 @@ function buildTree(nodes: DriveNode[]): DriveNode[] {
       .map((f) => ({ ...f, children: undefined }));
     root.push(dir);
   }
-  root.push(...files);
+
+  for (const file of files) {
+    const inDir = dirs.some(
+      (d) => file.path.startsWith(d.path + "/") || file.path.startsWith(d.path + "\\")
+    );
+    if (!inDir) root.push(file);
+  }
+
   return root;
 }
 

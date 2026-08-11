@@ -11,12 +11,9 @@ export function useAgentStatus() {
   });
 
   useEffect(() => {
-    const handler = (_event: Electron.IpcRendererEvent, s: AgentState) => setState(s);
+    const unsub = window.quantumAPI.agent.onStatus(setState);
     window.quantumAPI.agent.getStatus().then(setState);
-    window.electron?.ipcRenderer?.on("agent:status", handler);
-    return () => {
-      window.electron?.ipcRenderer?.removeListener("agent:status", handler);
-    };
+    return unsub;
   }, []);
 
   return state;

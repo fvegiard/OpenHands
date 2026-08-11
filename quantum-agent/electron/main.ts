@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import * as pty from "node-pty";
-import { spawn, ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -195,7 +195,7 @@ function createWindow(): void {
 async function ensureServerRunning(): Promise<number> {
   if (serverProcess && serverProcess.exitCode === null) return 8765;
   const serverBin = path.join(PROJECT_ROOT, "node_modules", ".bin", "tsx");
-  const serverEntry = path.join(PROJECT_ROOT, "src", "cli.ts");
+  const _serverEntry = path.join(PROJECT_ROOT, "src", "cli.ts");
   if (!fs.existsSync(serverBin)) {
     throw new Error("tsx not found — run pnpm install first");
   }
@@ -278,7 +278,7 @@ ipcMain.handle("agent:stop", async () => {
 
 ipcMain.handle("agent:send", (_event, text: string) => {
   if (!agentPty || agentState.status !== "running") return { ok: false };
-  agentPty.write(text + "\r");
+  agentPty.write(`${text}\r`);
   return { ok: true };
 });
 
@@ -292,6 +292,10 @@ ipcMain.handle("mcp:call-tool", async (_event, tool: string, args: Record<string
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
     });
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `HTTP ${res.status}: ${text}` };
+    }
     const data = await res.json();
     return { ok: true, data };
   } catch (err) {

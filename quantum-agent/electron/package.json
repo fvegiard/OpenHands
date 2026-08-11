@@ -1,7 +1,7 @@
 {
   "name": "quantum-agent-electron",
   "version": "0.1.0",
-  "main": "../main.ts",
+  "main": "./main.ts",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

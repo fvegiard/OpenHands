@@ -1,4 +1,3 @@
-import React from "react";
 import { useAgentStatus } from "../hooks/useAgentIPC";
 
 const STATUS_COLORS: Record<string, string> = {

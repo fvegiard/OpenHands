@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import AgentStatus from "./components/AgentStatus";
 import TabNav from "./components/TabNav";
 import LogStream from "./components/LogStream";

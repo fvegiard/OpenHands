@@ -73,6 +73,7 @@ export interface QuantumAPI {
     stop(): Promise<{ ok: boolean }>;
     send(text: string): Promise<{ ok: boolean }>;
     getStatus(): Promise<AgentState>;
+    onStatus(callback: (status: AgentState) => void): () => void;
   };
   mcp: {
     callTool(tool: string, args: Record<string, unknown>): Promise<{
@@ -126,6 +127,11 @@ const api: QuantumAPI = {
     stop: () => ipcRenderer.invoke("agent:stop"),
     send: (text) => ipcRenderer.invoke("agent:send", text),
     getStatus: () => ipcRenderer.invoke("agent:status-get"),
+    onStatus: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: AgentState) => callback(status);
+      ipcRenderer.on("agent:status", handler);
+      return () => ipcRenderer.removeListener("agent:status", handler);
+    },
   },
   mcp: {
     callTool: (tool, args) => ipcRenderer.invoke("mcp:call-tool", tool, args),

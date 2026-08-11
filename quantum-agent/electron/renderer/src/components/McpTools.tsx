@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 interface McpTool {
   name: string;
@@ -31,7 +31,11 @@ export default function McpTools() {
       let parsedArgs: Record<string, unknown> = {};
       try {
         parsedArgs = JSON.parse(args);
-      } catch { /* empty */ }
+      } catch (parseErr) {
+        setResult(`Invalid JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+        setLoading(false);
+        return;
+      }
       const res = await window.quantumAPI.mcp.callTool(selected, parsedArgs);
       if (res.ok) {
         setResult(JSON.stringify(res.data, null, 2));

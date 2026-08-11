@@ -1,4 +1,3 @@
-import React from "react";
 import { useCorrections } from "../hooks/useAgentIPC";
 
 const TYPE_COLORS: Record<string, string> = {
@@ -44,7 +43,9 @@ export default function CorrectionProposals() {
               <button onClick={() => apply(c.id)} className="success">
                 Apply Fix
               </button>
-              <button className="danger">Dismiss</button>
+              <button onClick={() => {}} className="danger">
+                Dismiss
+              </button>
             </div>
           </div>
         ))}

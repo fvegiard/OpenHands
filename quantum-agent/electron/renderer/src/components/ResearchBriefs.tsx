@@ -1,4 +1,3 @@
-import React from "react";
 import { useResearchBriefs } from "../hooks/useAgentIPC";
 
 export default function ResearchBriefs() {

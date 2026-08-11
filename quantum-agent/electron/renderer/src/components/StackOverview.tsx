@@ -1,4 +1,3 @@
-import React from "react";
 import { useStacks } from "../hooks/useAgentIPC";
 
 export default function StackOverview() {

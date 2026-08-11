@@ -1,4 +1,3 @@
-import React from "react";
 import { useErrors } from "../hooks/useAgentIPC";
 
 export default function ErrorPanel() {

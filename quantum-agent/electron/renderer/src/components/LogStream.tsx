@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { useLogs } from "../hooks/useAgentIPC";
 
 const LEVEL_COLORS: Record<string, string> = {

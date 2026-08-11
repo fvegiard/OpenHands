@@ -1,4 +1,3 @@
-import React, { useState } from "react";
 import { useCdpScreenshots } from "../hooks/useAgentIPC";
 
 export default function CdpScreenshots() {
