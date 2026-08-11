@@ -1,12 +1,12 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   handleMessage,
   runFixNodeVersion,
-  runFixPythonVersion,
   runFixPath,
+  runFixPythonVersion,
   runFixShellSyntax,
   runLlmCorrection,
 } from "../../src/mcp/corrector.ts";
@@ -14,7 +14,10 @@ import {
 describe("corrector tools", () => {
   describe("runFixNodeVersion", () => {
     function makeNodeRoot(versionFile: string, content: string): string {
-      const root = join(tmpdir(), `corrector-node-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-node-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, versionFile), content);
       return root;
@@ -37,7 +40,10 @@ describe("corrector tools", () => {
     });
 
     it("reads package.json engines.node", () => {
-      const root = join(tmpdir(), `corrector-pkg-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-pkg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, "package.json"), JSON.stringify({ engines: { node: ">=16" } }));
       const result = runFixNodeVersion({ root });
@@ -47,7 +53,10 @@ describe("corrector tools", () => {
     });
 
     it("returns not found when nothing is detected", () => {
-      const root = join(tmpdir(), `corrector-none-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-none-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, "package.json"), JSON.stringify({ name: "test" }));
       const result = runFixNodeVersion({ root });
@@ -57,7 +66,10 @@ describe("corrector tools", () => {
 
   describe("runFixPythonVersion", () => {
     it("detects from pyproject.toml", () => {
-      const root = join(tmpdir(), `corrector-py-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-py-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, "pyproject.toml"), 'requires-python = ">=3.11"\n');
       const result = runFixPythonVersion({ root });
@@ -67,7 +79,10 @@ describe("corrector tools", () => {
     });
 
     it("falls back to runtime.txt", () => {
-      const root = join(tmpdir(), `corrector-rt-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-rt-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, "runtime.txt"), "python-3.10.12\n");
       const result = runFixPythonVersion({ root });
@@ -77,7 +92,10 @@ describe("corrector tools", () => {
     });
 
     it("falls back to .python-version", () => {
-      const root = join(tmpdir(), `corrector-pv-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-pv-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, ".python-version"), "3.9.18\n");
       const result = runFixPythonVersion({ root });
@@ -87,7 +105,10 @@ describe("corrector tools", () => {
     });
 
     it("suggests venv activation", () => {
-      const root = join(tmpdir(), `corrector-venv-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const root = join(
+        tmpdir(),
+        `corrector-venv-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       mkdirSync(root, { recursive: true });
       writeFileSync(join(root, ".python-version"), "3.11\n");
       const result = runFixPythonVersion({ root });

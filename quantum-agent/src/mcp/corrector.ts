@@ -1,11 +1,10 @@
 #!/usr/bin/env tsx
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { execa, execaSync } from "execa";
+import { existsSync, readFileSync } from "node:fs";
+import { execaSync } from "execa";
 import { z } from "zod";
-
+import { runGrep } from "../tools/repo.ts";
 import type { ToolResult } from "../tools/shell.ts";
 import { autoWebSearch, type SearchHit } from "../tools/web.ts";
-import { grepSchema, runGrep } from "../tools/repo.ts";
 
 // ============================================================================
 // Tool Schemas (Zod)
@@ -56,7 +55,7 @@ function detectFromFile(path: string): string | null {
   }
 }
 
-function resolveInsideRoot(p: string, root: string = process.cwd()): string {
+function _resolveInsideRoot(p: string, root: string = process.cwd()): string {
   const absRoot = require("node:path").resolve(root);
   const candidate = require("node:path").isAbsolute(p)
     ? require("node:path").resolve(p)
@@ -100,13 +99,19 @@ const COMMON_PATH_ENTRIES = [
   "./.venv/bin",
 ];
 
-const SHELL_COMMON_ERROR_PATTERNS: { regex: RegExp; hint: string }[] = [
-  { regex: /syntax error near unexpected token `([^']+)'/i, hint: "Check for unquoted strings or missing semicolons." },
+const _SHELL_COMMON_ERROR_PATTERNS: { regex: RegExp; hint: string }[] = [
+  {
+    regex: /syntax error near unexpected token `([^']+)'/i,
+    hint: "Check for unquoted strings or missing semicolons.",
+  },
   { regex: /command not found/i, hint: "Verify the binary exists in PATH or install it." },
   { regex: /no such file or directory/i, hint: "Check the path spelling and permissions." },
   { regex: /permission denied/i, hint: "Check file permissions (`chmod +x <file>`)." },
-  { regex: /unexpected EOF while parsing/i, hint: "Missing closing quote, bracket, or `fi`/`done`/`esac`." },
-  { regex: /cannot find symbol/i, hint: "Review variable quoting (`$var` vs `${var}`)." },
+  {
+    regex: /unexpected EOF while parsing/i,
+    hint: "Missing closing quote, bracket, or `fi`/`done`/`esac`.",
+  },
+  { regex: /cannot find symbol/i, hint: `Review variable quoting (\`$var\` vs \`\${var}\`).` },
 ];
 
 // ============================================================================
@@ -267,7 +272,9 @@ export function runFixPythonVersion(input: unknown): ToolResult {
     }
 
     suggestions.push(`Create venv with: python${spec.startsWith("3") ? "3" : ""} -m venv .venv`);
-    suggestions.push(`Activate: source .venv/bin/activate  (Unix) or .venv\\Scripts\\activate  (Windows)`);
+    suggestions.push(
+      `Activate: source .venv/bin/activate  (Unix) or .venv\\Scripts\\activate  (Windows)`,
+    );
   }
 
   const text = [
@@ -285,16 +292,13 @@ export function runFixPath(input: unknown): ToolResult {
   const pathEntries = rawPath.split(require("node:path").delimiter);
   const missing = (args.missing ?? []).filter((p) => !pathEntries.includes(p));
 
-  const shellName = (process.env.SHELL ?? process.env.COMSPEC ?? "unknown").split("/").pop() ?? "unknown";
+  const shellName =
+    (process.env.SHELL ?? process.env.COMSPEC ?? "unknown").split("/").pop() ?? "unknown";
   const shell = args.shell ?? shellName;
   const rcFiles = SHELL_RC_MAP[shell] ?? [];
   const home = process.env.HOME ?? "";
 
-  const lines: string[] = [
-    `Shell: ${shell}`,
-    `PATH entries: ${pathEntries.length}`,
-    "",
-  ];
+  const lines: string[] = [`Shell: ${shell}`, `PATH entries: ${pathEntries.length}`, ""];
 
   const explicitMissing = missing.filter((p) => !pathEntries.includes(p));
   const detectedIssues: string[] = [];
@@ -316,9 +320,10 @@ export function runFixPath(input: unknown): ToolResult {
     lines.push("Suggested shell RC edits:");
     for (const rc of rcFiles) {
       const full = rc.startsWith("$PROFILE")
-        ? process.env.PWsh_PROFILE ?? `${home}/Documents/PowerShell/Microsoft.PowerShell_profile.ps1`
+        ? (process.env.PWsh_PROFILE ??
+          `${home}/Documents/PowerShell/Microsoft.PowerShell_profile.ps1`)
         : rc.startsWith("$")
-          ? process.env[rc.slice(1)] ?? rc
+          ? (process.env[rc.slice(1)] ?? rc)
           : `${home}/${rc}`;
       for (const entry of allMissing) {
         lines.push(`  echo 'export PATH="${entry}:$PATH"' >> ${full}`);
@@ -339,11 +344,22 @@ function shellcheckHeuristic(script: string): { line: number; message: string }[
     if (line.includes("$") && !line.includes("${") && /[A-Za-z_]\w*/.test(line)) {
       const unquoted = line.match(/\$[A-Za-z_]\w*/g);
       if (unquoted && unquoted.length > 0) {
-        issues.push({ line: i + 1, message: `Possible unquoted variable expansion: ${unquoted.join(", ")}` });
+        issues.push({
+          line: i + 1,
+          message: `Possible unquoted variable expansion: ${unquoted.join(", ")}`,
+        });
       }
     }
-    if (/[|&;]/.test(line) && !line.includes("then") && !line.includes("do") && line.trim().length > 80) {
-      issues.push({ line: i + 1, message: "Long line with shell metacharacters — consider breaking up." });
+    if (
+      /[|&;]/.test(line) &&
+      !line.includes("then") &&
+      !line.includes("do") &&
+      line.trim().length > 80
+    ) {
+      issues.push({
+        line: i + 1,
+        message: "Long line with shell metacharacters — consider breaking up.",
+      });
     }
   }
   return issues;
@@ -355,7 +371,10 @@ export function runFixShellSyntax(input: unknown): ToolResult {
 
   let shellcheckAvailable = false;
   try {
-    const r = execaSync("bash", ["-lc", "command -v shellcheck"], { reject: false, encoding: "utf8" });
+    const r = execaSync("bash", ["-lc", "command -v shellcheck"], {
+      reject: false,
+      encoding: "utf8",
+    });
     shellcheckAvailable = r.exitCode === 0 && r.stdout.trim().length > 0;
   } catch {
     // ignore
@@ -365,12 +384,20 @@ export function runFixShellSyntax(input: unknown): ToolResult {
 
   if (shellcheckAvailable) {
     try {
-      const r = execaSync("shellcheck", ["-f", "gcc", "-"], { input: script, reject: false, encoding: "utf8" });
+      const r = execaSync("shellcheck", ["-f", "gcc", "-"], {
+        input: script,
+        reject: false,
+        encoding: "utf8",
+      });
       if (r.stdout.trim()) {
         for (const line of r.stdout.trim().split("\n")) {
           const m = line.match(/(.+?):(\d+):(\d+):\s*(.+)/);
           if (m) {
-            issues.push({ line: parseInt(m[2] ?? "0", 10), message: m[4] ?? "", source: "shellcheck" });
+            issues.push({
+              line: parseInt(m[2] ?? "0", 10),
+              message: m[4] ?? "",
+              source: "shellcheck",
+            });
           }
         }
       }
@@ -391,9 +418,7 @@ export function runFixShellSyntax(input: unknown): ToolResult {
       : [
           `Shellcheck available: ${shellcheckAvailable}`,
           `Issues found: ${issues.length}`,
-          ...issues
-            .slice(0, 50)
-            .map((i) => `  line ${i.line}: [${i.source}] ${i.message}`),
+          ...issues.slice(0, 50).map((i) => `  line ${i.line}: [${i.source}] ${i.message}`),
         ].join("\n");
 
   return { content: [{ type: "text", text }] };

@@ -87,7 +87,7 @@ function buildMcpServers(quantum: unknown, gobby: unknown): Record<string, unkno
     command: "npx",
     args: ["-y", "tsx", "./src/mcp/pc-inspector.ts"],
   };
-  servers["corrector"] = {
+  servers.corrector = {
     type: "stdio",
     command: "npx",
     args: ["-y", "tsx", "./src/mcp/corrector.ts"],
