@@ -78,6 +78,11 @@ function buildMcpServers(quantum: unknown): Record<string, unknown> {
     command: "npx",
     args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
   };
+  servers["pc-inspector"] = {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "tsx", "./src/mcp/pc-inspector.ts"],
+  };
   return servers;
 }
 
