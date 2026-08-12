@@ -1,6 +1,8 @@
 node_modules/
 dist/
+electron/out/
 coverage/
+*.tsbuildinfo
 .quantum/
 .env
 .env.local

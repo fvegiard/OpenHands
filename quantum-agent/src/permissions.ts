@@ -32,8 +32,10 @@ const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 function isInsideProject(targetPath: string, root: string): boolean {
   if (!targetPath) return false;
-  const abs = resolve(targetPath);
-  return abs.startsWith(`${root}/`) || abs === root;
+  const normalize = (path: string) => resolve(path).replaceAll("\\", "/");
+  const abs = normalize(targetPath);
+  const normalizedRoot = normalize(root);
+  return abs.startsWith(`${normalizedRoot}/`) || abs === normalizedRoot;
 }
 
 export function buildCanUseTool(opts: { projectRoot?: string } = {}) {

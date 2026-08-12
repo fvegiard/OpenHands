@@ -4,6 +4,8 @@
 
 import { z } from "zod";
 import { recall, remember } from "../memory.ts";
+import { researchTopicSchema, runResearchTopic } from "../research/scout.ts";
+import { runValidateStack, validateStackSchema } from "../research/stack-validator.ts";
 import { grepSchema, readSchema, runGrep, runRead } from "./repo.ts";
 import { runShell, shellSchema } from "./shell.ts";
 import { runFetch, webSchema } from "./web.ts";
@@ -32,7 +34,16 @@ async function loadSdk(): Promise<SdkLike | null> {
 
 export async function buildQuantumToolset(): Promise<QuantumToolset> {
   const sdk = await loadSdk();
-  const toolNames = ["bash", "fetch", "grep", "read", "remember", "recall"];
+  const toolNames = [
+    "bash",
+    "fetch",
+    "grep",
+    "read",
+    "remember",
+    "recall",
+    "research_topic",
+    "validate_stack",
+  ];
 
   if (!sdk) {
     return { serverInstance: null, toolNames };
@@ -74,6 +85,37 @@ export async function buildQuantumToolset(): Promise<QuantumToolset> {
             },
           ],
         };
+      },
+    ),
+    sdk.tool(
+      "research_topic",
+      "Spawn parallel web-research scouts on different angles (official docs, GitHub issues, blogs) and return a ranked brief.",
+      researchTopicSchema,
+      async (a: any) => {
+        const brief = await runResearchTopic(a);
+        const lines = [
+          `# Research brief: ${brief.query}`,
+          `Scouts: ${brief.uniqueHits}/${brief.totalHits} unique hits`,
+          "",
+          ...brief.ranked
+            .slice(0, 10)
+            .map(
+              (r, i) =>
+                `${i + 1}. [${r.angle}] ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 140)}`,
+            ),
+          "",
+          `## Summary\n${brief.summary}`,
+        ];
+        return { content: [{ type: "text", text: lines.join("\n") }] };
+      },
+    ),
+    sdk.tool(
+      "validate_stack",
+      "Inspect the codebase to detect Node/Python versions, package managers, shell config, and path conventions. Optionally cross-reference web research.",
+      validateStackSchema,
+      async (a: any) => {
+        const result = await runValidateStack(a);
+        return { content: [{ type: "text", text: result.summary }] };
       },
     ),
   ];
