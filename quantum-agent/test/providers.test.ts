@@ -72,6 +72,35 @@ describe("provider registry", () => {
     expect(cfg.runtime).toBe("codex");
   });
 
+  it("ignores persisted model/profile when QUANTUM_RUNTIME overrides the runtime", () => {
+    persistSelection({
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5.1-codex",
+      secretEnv: "OPENAI_API_KEY",
+      resumeThreadId: "thread-stale",
+    });
+    const cfg = resolveRuntimeConfig({
+      QUANTUM_HOME: home,
+      QUANTUM_RUNTIME: "claude",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.runtime).toBe("claude");
+    expect(cfg.model).toBe(REGISTRY.claude.defaultModel);
+    expect(cfg.provider).toBeUndefined();
+    expect(cfg.secretEnv).toBeUndefined();
+    expect(cfg.resumeThreadId).toBeUndefined();
+  });
+
+  it("keeps persisted profile when env runtime matches persisted runtime", () => {
+    persistSelection({ runtime: "codex", model: "gpt-5.1-codex" });
+    const cfg = resolveRuntimeConfig({
+      QUANTUM_HOME: home,
+      QUANTUM_RUNTIME: "codex",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.runtime).toBe("codex");
+    expect(cfg.model).toBe("gpt-5.1-codex");
+  });
+
   it("rejects a provider unsupported by the runtime", () => {
     expect(validateProvider("claude", "openrouter")).toMatch(/not supported/);
     expect(validateProvider("claude", "bedrock")).toBeNull();

@@ -256,15 +256,20 @@ export function resolveRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runt
     );
   }
   const runtime = parsedId.data;
-  const provider = env.QUANTUM_PROVIDER || persisted.provider;
-  const model = env.QUANTUM_MODEL || persisted.model || REGISTRY[runtime].defaultModel;
+  // When QUANTUM_RUNTIME overrides a persisted runtime, ignore the rest of the
+  // persisted profile (model, provider, secretEnv, package, resume). Mixing a
+  // Codex/MiniMax model into a Claude run is the stale-override Bugbot case.
+  const persistedMatchesRuntime = persisted.runtime === runtime;
+  const persistedIfMatch = persistedMatchesRuntime ? persisted : {};
+  const provider = env.QUANTUM_PROVIDER || persistedIfMatch.provider;
+  const model = env.QUANTUM_MODEL || persistedIfMatch.model || REGISTRY[runtime].defaultModel;
   // Profile fields — env overrides a persisted `provider select`. NAMES/config
   // only; values are never read here (QUANTUM_AISDK_PACKAGE kept for back-compat).
-  const baseUrl = env.QUANTUM_BASE_URL || persisted.baseUrl;
-  const secretEnv = env.QUANTUM_SECRET_ENV || persisted.secretEnv;
+  const baseUrl = env.QUANTUM_BASE_URL || persistedIfMatch.baseUrl;
+  const secretEnv = env.QUANTUM_SECRET_ENV || persistedIfMatch.secretEnv;
   const providerPackage =
-    env.QUANTUM_PROVIDER_PACKAGE || env.QUANTUM_AISDK_PACKAGE || persisted.providerPackage;
-  const resumeThreadId = env.QUANTUM_RESUME_THREAD_ID || persisted.resumeThreadId;
+    env.QUANTUM_PROVIDER_PACKAGE || env.QUANTUM_AISDK_PACKAGE || persistedIfMatch.providerPackage;
+  const resumeThreadId = env.QUANTUM_RESUME_THREAD_ID || persistedIfMatch.resumeThreadId;
   return RuntimeConfigSchema.parse({
     runtime,
     provider,
