@@ -1,0 +1,49 @@
+S-1695 — Hotel Playground, Kahnawake
+====================================
+
+SOMMAIRE PAR CHAPITRE
+
+Chapitre                                          Sous-total   Facteur m-d      Total ajusté   Mult Bloc             Total
+--------------------------------------------------------------------------------------------------------------------------
+RELEVE RELEVÉ DE MATÉRIEL (totaux publiés)      397 308,56 $             —      397 308,56 $       ×1,00      397 308,56 $
+  main-d’oeuvre                                  8 106,286 h         ×1,00       8 106,286 h       ×1,00       8 106,286 h
+
+CONTRÔLE DE COHÉRENCE
+
+  Heures chargées                8 150,000 h
+  Heures du relevé de matériel   8 106,286 h
+  Balance                        -43,714 h
+  Ajouté par l’estimateur        +43,714 h
+  Provenance                     S-1695, contrôle de cohérence : 8150,000 h chargées contre 8106,286 h au relevé — arrondi au 50 h supérieur, ou rétro-calcul depuis un prix cible.
+  Verdict                        ok — +43,714 h ajoutées au relevé (0,539 %), coussin usuel.
+
+SOMMAIRE DE SOUMISSION
+
+                             Coûtant  Administration      Profit             Vendant
+------------------------------------------------------------------------------------
+Matériel                397 308,56 $          0,00 %      0,00 %        397 308,56 $
+Service                 806 850,00 $          0,00 %      0,00 %        806 850,00 $
+Autres frais                  0,00 $          0,00 %      0,00 %              0,00 $
+
+  Sous-total              1 204 158,56 $
+  Ajustement global       0,00 $
+  TPS                     0,00 $
+  TVQ                     0,00 $
+  GRAND TOTAL             1 204 158,56 $
+
+Écart de réconciliation (arrondi d’impression) : 0,00 $
+
+AVERTISSEMENTS
+
+  • Taux de 99,00 $/h traité comme du coûtant pur : la décomposition réelle est inconnue. Toute marge déjà contenue dans ce taux est donc comptée comme un coût, ce qui sous-estime le profit affiché sans changer le grand total.
+
+HYPOTHÈSES INFÉRÉES (non lues sur le rapport ACCEO)
+
+  • [H-FACTEUR-MD] Le facteur de main-d'oeuvre corrige la PRODUCTIVITÉ : il multiplie les heures, jamais les dollars de matériel.
+  • [H-MULT-BLOC] Le Mult Bloc est un facteur de répétition physique : il multiplie les trois axes.
+  • [H-PERTE] Le facteur de perte augmente la quantité de matériel achetée, pas les heures : on ne pose pas les retailles.
+  • [H-AUTRES-FRAIS] Sous-traitance, équipement et cautionnement tombent dans le seau « Autres frais ».
+  • [H-PRIX-AXE] Le prix unitaire d'une ligne est du COÛTANT par défaut.
+  • [H-ECART] L'écart entre la somme des extensions imprimées et le grand total publié est un résidu d'arrondi d'impression, pas une saisie.
+
+Modèle cohérent avec UNE observation (relevé S-1695). Non vérifié contre un second rapport ACCEO.

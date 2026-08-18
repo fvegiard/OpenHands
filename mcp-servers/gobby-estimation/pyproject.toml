@@ -1,0 +1,37 @@
+[project]
+name = "gobby-estimation"
+version = "0.1.0"
+description = "Serveur MCP d'estimation électrique — réplique du modèle ACCEO Estimation"
+requires-python = ">=3.12"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "fastmcp>=3.2,<4",
+  "mcp>=1.25",
+  "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff==0.12.5",
+]
+
+[tool.ruff]
+# Aligné sur la racine du dépôt : guillemets simples pour le code, doubles pour
+# les docstrings. Voir le [tool.ruff] de /pyproject.toml.
+format.quote-style = "single"
+lint.select = [ "B", "E", "F", "I", "Q", "UP006", "UP007", "UP008", "W" ]
+lint.ignore = [ "E501" ]
+lint.flake8-quotes.docstring-quotes = "double"
+lint.flake8-quotes.inline-quotes = "single"
+
+[tool.pytest.ini_options]
+# Donne à ce sous-projet son propre rootdir et rend le paquet importable sans
+# installation. Sans ça, `pytest` lancé d'ailleurs ne résout pas
+# `gobby_estimation`.
+pythonpath = [ "." ]
+testpaths = [ "tests" ]

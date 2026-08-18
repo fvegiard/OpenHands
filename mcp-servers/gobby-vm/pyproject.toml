@@ -1,0 +1,34 @@
+[project]
+name = "gobby-vm"
+version = "0.1.0"
+description = "Serveur MCP unifié — dispatch de sessions Claude Code autonomes, outils et vue noVNC"
+requires-python = ">=3.12"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "fastmcp>=3.2,<4",
+  "mcp>=1.25",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff==0.12.5",
+]
+
+[tool.ruff]
+format.quote-style = "single"
+lint.select = [ "B", "E", "F", "I", "Q", "UP006", "UP007", "UP008", "W" ]
+lint.ignore = [ "E501" ]
+lint.flake8-quotes.docstring-quotes = "double"
+lint.flake8-quotes.inline-quotes = "single"
+
+[tool.pytest.ini_options]
+pythonpath = [ "." ]
+testpaths = [ "tests" ]
+# Les outils MCP sont async ; « auto » évite un décorateur sur chaque test,
+# comme le fait le pytest.ini de la racine.
+asyncio_mode = "auto"
