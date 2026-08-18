@@ -1,0 +1,71 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "make install-pre-commit-hooks",
+            "timeout": 120,
+            "statusMessage": "pre-commit hooks…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/format-python-edite.py",
+            "timeout": 45,
+            "statusMessage": "ruff…"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"$(jq -r '.stop_hook_active // false')\" = \"true\" ]; then exit 0; fi; make -C mcp-servers verifier",
+            "timeout": 600,
+            "statusMessage": "verifier complet (pre-commit + pytest + mypy)…"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git branch:*)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)",
+      "Bash(make -C mcp-servers:*)",
+      "Bash(make install-pre-commit-hooks:*)",
+      "Bash(pre-commit run:*)",
+      "Bash(./scripts/verify.sh:*)",
+      "Bash(python3 -c:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(wc:*)",
+      "Bash(which:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(mcp-servers/gobby-estimation/.venv/bin/python:*)"
+    ]
+  }
+}
