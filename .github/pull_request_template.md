@@ -1,4 +1,5 @@
 <!-- Keep this PR as draft until it is ready for review. -->
+<!-- Fork rule: set the PR base to `perso` or `dev`. Do not target `main`. -->
 
 <!-- AI/LLM agents: be concise and specific. Do not check the box below. -->
 

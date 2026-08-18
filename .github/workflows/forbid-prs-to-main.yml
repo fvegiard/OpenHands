@@ -1,0 +1,27 @@
+# Block human/agent pull requests into main. main is the All-Hands-AI mirror.
+name: Forbid PRs to main
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  reject:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require perso or dev instead of main
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "PRs must target perso or dev, not main."
+          echo "head_ref=$HEAD_REF actor=$ACTOR"
+          # Allow the one-time upstream restore branch and the sync bot.
+          case "$HEAD_REF" in
+            cursor/restore-upstream-openhands-3ed7) exit 0 ;;
+          esac
+          if [ "$ACTOR" = "github-actions[bot]" ]; then
+            exit 0
+          fi
+          exit 1
