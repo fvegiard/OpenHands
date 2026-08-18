@@ -1,3 +1,4 @@
+# main is an upstream mirror only. This is the only workflow allowed to push main.
 name: Sync with upstream
 
 on:

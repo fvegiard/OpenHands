@@ -1,6 +1,16 @@
 This repository contains the code for OpenHands, an automated AI software engineer. It has a Python backend
 (in the `openhands` directory) and React frontend (in the `frontend` directory).
 
+## Fork branch policy (fvegiard/OpenHands)
+
+`main` is an **upstream mirror only** (All-Hands-AI/OpenHands). Do **not** commit, push, or open pull requests against `main` for personal or agent work.
+
+- Default working branch: **`perso`**
+- Alternate working branch: **`dev`**
+- Open every PR with base **`perso`** (or `dev` if the change belongs there)
+- Never use base `main` unless the change is the automated upstream sync workflow
+- Never `git push origin main`
+
 ## General Setup:
 To set up the entire repo, including frontend and backend, run `make build`.
 You don't need to do this unless the user asks you to, or if you're trying to run the entire application.
@@ -43,6 +53,7 @@ then re-run the command to ensure it passes. Common issues include:
 - Prefer specific `git add <filename>` instead of `git add .` to avoid accidentally staging unintended files
 - Be especially careful with `git reset --hard` after staging files, as it will remove accidentally staged files
 - When remote has new changes, use `git fetch upstream && git rebase upstream/<branch>` on the same branch
+- On this fork, branch from `perso` or `dev` and open PRs against those branches — never against `main`
 
 ## Lockfile Regeneration (Preserve Original Tool Versions)
 

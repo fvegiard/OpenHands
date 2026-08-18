@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    target-branch: perso
     schedule:
       interval: "daily"
     cooldown:
@@ -29,6 +30,7 @@ updates:
 
   - package-ecosystem: "pip"
     directory: "/enterprise"
+    target-branch: perso
     schedule:
       interval: "daily"
     cooldown:
@@ -46,6 +48,7 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/frontend"
+    target-branch: perso
     schedule:
       interval: "daily"
     cooldown:
@@ -69,6 +72,7 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/docs"
+    target-branch: perso
     schedule:
       interval: "weekly"
       day: "wednesday"
@@ -96,6 +100,7 @@ updates:
       - "/"
       - "/.github/actions/docker-image-tags"
       - "/.github/actions/docker-merge-manifest"
+    target-branch: perso
     schedule:
       interval: "weekly"
     cooldown:
@@ -105,6 +110,7 @@ updates:
   - package-ecosystem: "docker"
     directories:
       - "containers/*"
+    target-branch: perso
     schedule:
       interval: "weekly"
     cooldown:
