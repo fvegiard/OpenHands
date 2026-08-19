@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "name": "openagent",
+  "displayName": "OpenAgent (OpenHands for Mavis)",
+  "version": "1.0.0",
+  "description": "OpenAgent — All-Hands-AI/OpenHands packaged as a Mavis plugin. Brings 26 curated shareable skills (GitHub, GitLab, Bitbucket, Docker, Kubernetes, code review, security, etc.), the antigravity MCP bridge, and the Claude Desktop stdio shim into the Mavis ecosystem so OpenHands runs as a first-class Mavis connector instead of a standalone CLI.",
+  "author": {
+    "name": "Francis Vegiard (Mavis Agent)",
+    "upstream": "All-Hands-AI/OpenHands",
+    "url": "https://github.com/fvegiard/OpenHands"
+  },
+  "icon": "icon.webp",
+  "category": "Code",
+  "license": "MIT (plugin glue) / OpenHands LICENSE (upstream code)",
+  "exampleQueries": [
+    "Spin up an OpenHands runtime session from Mavis and run a multi-step refactor in /workspace/proj",
+    "Use the openagent github skill to triage the 5 oldest issues on fvegiard/Mavis and post a status comment",
+    "Review the diff on branch dev/mavis-plugin and run the openagent code-review skill end-to-end",
+    "Run an openagent doctor pipeline: validate the runtime, list loaded skills, and report health to Mavis"
+  ],
+  "homepage": "./MAVIS_PLUGIN.md",
+  "source": {
+    "type": "git",
+    "url": "https://github.com/fvegiard/OpenHands.git",
+    "ref": "dev/mavis-plugin",
+    "upstream": "https://github.com/All-Hands-AI/OpenHands"
+  },
+  "apps": [],
+  "mcpServers": [
+    {
+      "name": "openagent-mcp",
+      "description": "FastMCP server that exposes OpenHands tools to Mavis (execute task, get session status, list skills, sync context).",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mavis_bridge.openclaw_m3.mcp_server"],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "OPENHANDS_BASE_URL": "${OPENHANDS_BASE_URL:-http://localhost:3000}"
+      },
+      "tools": [
+        "openagent_execute_task",
+        "openagent_get_status",
+        "openagent_list_skills",
+        "openagent_sync_context"
+      ]
+    }
+  ],
+  "skills": [
+    "mavis-skills/add_agent/SKILL.md",
+    "mavis-skills/add_repo_inst/SKILL.md",
+    "mavis-skills/address_pr_comments/SKILL.md",
+    "mavis-skills/agent_memory/SKILL.md",
+    "mavis-skills/agent_sdk_builder/SKILL.md",
+    "mavis-skills/azure_devops/SKILL.md",
+    "mavis-skills/bitbucket/SKILL.md",
+    "mavis-skills/bitbucket_data_center/SKILL.md",
+    "mavis-skills/code-review/SKILL.md",
+    "mavis-skills/codereview-roasted/SKILL.md",
+    "mavis-skills/default-tools/SKILL.md",
+    "mavis-skills/docker/SKILL.md",
+    "mavis-skills/fix-py-line-too-long/SKILL.md",
+    "mavis-skills/fix_test/SKILL.md",
+    "mavis-skills/flarglebargle/SKILL.md",
+    "mavis-skills/github/SKILL.md",
+    "mavis-skills/gitlab/SKILL.md",
+    "mavis-skills/kubernetes/SKILL.md",
+    "mavis-skills/npm/SKILL.md",
+    "mavis-skills/onboarding_agent/SKILL.md",
+    "mavis-skills/pdflatex/SKILL.md",
+    "mavis-skills/security/SKILL.md",
+    "mavis-skills/ssh/SKILL.md",
+    "mavis-skills/swift-linux/SKILL.md",
+    "mavis-skills/update_pr_description/SKILL.md",
+    "mavis-skills/update_test/SKILL.md"
+  ],
+  "mavis": {
+    "minimumVersion": "10.0.0",
+    "agentBridge": "mavis_bridge.openclaw_m3.AgentBridge",
+    "skillsRoot": "mavis-skills/",
+    "upstreamSync": {
+      "remote": "upstream",
+      "url": "https://github.com/All-Hands-AI/OpenHands.git",
+      "branch": "main",
+      "strategy": "rebase-on-dev",
+      "notes": "Sync upstream OpenHands main into dev/mavis-plugin, then re-apply Mavis plugin layer (manifest.json + mavis_bridge/). Never commit Mavis files directly to main.",
+      "skillPortScript": "python mavis_bridge/skills_sync.py --src skills/ --dst mavis-skills/ --verify"
+    },
+    "memory": {
+      "scope": "agent",
+      "topic": "openagent-bridge",
+      "writes": "Runtime telemetry + session IDs into the Mavis openagent-bridge memory topic for cross-session continuity."
+    }
+  }
+}
