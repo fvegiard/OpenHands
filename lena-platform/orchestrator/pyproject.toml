@@ -1,0 +1,41 @@
+[project]
+name = "lena-control-plane"
+version = "0.1.0"
+description = "Bounded Léna orchestrator, Luna worker routing, OpenHands dispatch, Supabase receipts, and electrical MCP tools"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "mcp>=1.10,<2",
+  "pydantic>=2.11,<3",
+  "uvicorn[standard]>=0.35,<1"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "ruff>=0.12,<1"
+]
+
+[project.scripts]
+lena-control-plane = "lena_control_plane.app:main"
+lena-electrical-mcp = "lena_control_plane.mcp_server:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lena_control_plane"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
