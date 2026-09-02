@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0.0",
+  "workers": [
+    {
+      "id": "luna-reader",
+      "purpose": "Read, search, extract, compare, and cite without changing external state.",
+      "permissions": ["read:workspace", "read:approved-connectors", "read:knowledge"],
+      "forbidden": ["write:external", "send:message", "deploy", "delete"],
+      "max_parallel": 4,
+      "timeout_seconds": 900
+    },
+    {
+      "id": "luna-planner",
+      "purpose": "Create task envelopes, dependency graphs, scenarios, and execution plans.",
+      "permissions": ["read:workspace", "read:approved-connectors", "write:run-notes"],
+      "forbidden": ["write:production", "send:message", "deploy", "delete"],
+      "max_parallel": 2,
+      "timeout_seconds": 900
+    },
+    {
+      "id": "luna-builder",
+      "purpose": "Implement one bounded change in a dedicated branch or worktree.",
+      "permissions": ["read:workspace", "write:worktree", "run:tests", "commit:feature-branch"],
+      "forbidden": ["push:main", "force-push", "write:production", "expose:secret"],
+      "max_parallel": 3,
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "luna-tester",
+      "purpose": "Execute tests, linters, schema checks, integration probes, and real-surface QA.",
+      "permissions": ["read:workspace", "run:tests", "write:test-artifacts"],
+      "forbidden": ["modify:production-code", "write:production", "send:message"],
+      "max_parallel": 3,
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "luna-reviewer",
+      "purpose": "Independently review architecture, code, evidence, risk, and acceptance criteria.",
+      "permissions": ["read:workspace", "read:test-artifacts", "write:review"],
+      "forbidden": ["self-approve", "write:production", "merge"],
+      "max_parallel": 2,
+      "timeout_seconds": 1200
+    },
+    {
+      "id": "luna-operator",
+      "purpose": "Perform approved reversible external actions and produce execution receipts.",
+      "permissions": ["read:task-approval", "write:approved-target", "write:execution-receipt"],
+      "requires": ["unexpired_task_scoped_approval", "idempotency_key", "rollback_plan"],
+      "forbidden": ["expand:scope", "force-push", "delete:irreversible", "reveal:secret"],
+      "max_parallel": 1,
+      "timeout_seconds": 1200
+    }
+  ],
+  "dispatch_rules": {
+    "single_writer_per_repository": true,
+    "single_operator_per_external_target": true,
+    "reviewer_cannot_review_own_change": true,
+    "high_risk_requires_independent_verifier": true,
+    "critical_risk_requires_human_approval": true,
+    "all_effects_require_receipt": true
+  }
+}
