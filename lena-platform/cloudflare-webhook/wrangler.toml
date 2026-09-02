@@ -1,0 +1,29 @@
+name = "lena-webhook-ingress"
+main = "src/index.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+# Replace this ID before the first remote deployment. Local development uses a local KV store.
+[[kv_namespaces]]
+binding = "WEBHOOK_REPLAY_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[[queues.producers]]
+binding = "LENA_EVENTS"
+queue = "lena-events"
+
+[[queues.consumers]]
+queue = "lena-events"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "lena-events-dlq"
+
+[vars]
+WEBHOOK_MAX_SKEW_SECONDS = "300"
+WEBHOOK_MAX_BODY_BYTES = "1048576"
+
+# Configure remotely as secrets, never [vars]:
+#   wrangler secret put WEBHOOK_SECRET
+#   wrangler secret put N8N_INTERNAL_TOKEN
+# Configure N8N_WEBHOOK_URL as an environment-specific variable or secret.
