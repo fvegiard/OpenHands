@@ -100,6 +100,45 @@ test("the Supabase foundation is additive, tenant-scoped, and server-only", () =
   );
 });
 
+test("the Supabase proposal enforces tenant consistency across references", () => {
+  const sql = read(
+    "integrations/lena-ai/supabase/proposals/202609010001_lena_control_plane_foundation.sql",
+  );
+  const executable = stripSqlComments(sql);
+
+  assert.match(
+    executable,
+    /create unique index if not exists projects_organization_id_id_uidx[\s\S]*on public\.projects \(organization_id, id\)/i,
+  );
+  assert.match(
+    executable,
+    /create unique index if not exists governance_runs_organization_id_id_uidx[\s\S]*on public\.governance_runs \(organization_id, id\)/i,
+  );
+  assert.ok(
+    (executable.match(/foreign key \(organization_id, [a-z_]+\)/gi) ?? [])
+      .length >= 15,
+  );
+  const normalized = executable.toLowerCase();
+  for (const parent of [
+    "sources",
+    "source_versions",
+    "documents",
+    "chunks",
+    "claims",
+    "webhook_events",
+    "approvals",
+  ]) {
+    assert.ok(
+      normalized.includes(`references lena.${parent}(organization_id, id)`),
+      `${parent} must be tenant-scoped`,
+    );
+  }
+  assert.match(
+    executable,
+    /on delete set null \(project_id\)/i,
+  );
+});
+
 test("the hardening proposal is bounded to eight indexes and one search_path fix", () => {
   const sql = read(
     "integrations/lena-ai/supabase/proposals/202609010002_existing_schema_hardening.sql",
