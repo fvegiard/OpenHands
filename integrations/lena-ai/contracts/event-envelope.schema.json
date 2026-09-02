@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/lena/event-envelope.schema.json",
+  "title": "Lena verified webhook event envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "organization_id",
+    "provider",
+    "event_type",
+    "occurred_at",
+    "received_at",
+    "idempotency_key",
+    "source",
+    "headers",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "organization_id": { "type": "string", "format": "uuid" },
+    "provider": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "delivery_id": { "type": ["string", "null"], "maxLength": 512 },
+    "event_type": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "received_at": { "type": "string", "format": "date-time" },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "source": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "headers": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "maxLength": 500 }
+    },
+    "payload": true
+  }
+}

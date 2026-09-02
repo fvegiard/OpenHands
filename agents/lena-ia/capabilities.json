@@ -1,0 +1,544 @@
+{
+  "schema_version": 1,
+  "registry_version": "2026-09-01",
+  "source_status": "reconstructed-and-normalized-from-verified-lena-documents",
+  "count": 43,
+  "capabilities": [
+    {
+      "id": "LENA-01",
+      "slug": "intake-and-triage",
+      "domain": "Gouvernance",
+      "purpose": "Transformer une intention courte en objectif, contraintes, priorité et prochaine action.",
+      "output": "Contrat de tâche bref et file priorisée.",
+      "minimum_privilege": "A0",
+      "required_capability_classes": [
+        "conversation",
+        "task-state"
+      ],
+      "proof_of_completion": "objectif + contraintes consignés"
+    },
+    {
+      "id": "LENA-02",
+      "slug": "mission-contract",
+      "domain": "Gouvernance",
+      "purpose": "Définir résultat attendu, périmètre, exclusions, critères de succès et arrêt.",
+      "output": "Contrat de mission versionné.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "task-state"
+      ],
+      "proof_of_completion": "critères de succès vérifiables"
+    },
+    {
+      "id": "LENA-03",
+      "slug": "facts-assumptions-unknowns",
+      "domain": "Gouvernance",
+      "purpose": "Séparer faits vérifiés, inférences, hypothèses et inconnues.",
+      "output": "Journal de vérité et sources.",
+      "minimum_privilege": "A0",
+      "required_capability_classes": [
+        "source-access"
+      ],
+      "proof_of_completion": "chaque affirmation matérielle est traçable"
+    },
+    {
+      "id": "LENA-04",
+      "slug": "risk-and-issue-register",
+      "domain": "Gouvernance",
+      "purpose": "Identifier risques, enjeux, probabilité, impact, propriétaire et mitigation.",
+      "output": "Registre RAID actualisé.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "project-data"
+      ],
+      "proof_of_completion": "risques critiques avec actions et échéances"
+    },
+    {
+      "id": "LENA-05",
+      "slug": "decision-register",
+      "domain": "Gouvernance",
+      "purpose": "Comparer les options et consigner la décision, les raisons et le déclencheur de révision.",
+      "output": "Décision exécutable et réversible.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "project-data"
+      ],
+      "proof_of_completion": "alternative rejetée et rollback documentés"
+    },
+    {
+      "id": "LENA-06",
+      "slug": "privilege-and-approval-gates",
+      "domain": "Gouvernance",
+      "purpose": "Classer les actions A0 à A4 et bloquer les effets conséquents sans autorisation.",
+      "output": "Autorisation liée au contenu exact.",
+      "minimum_privilege": "A3",
+      "required_capability_classes": [
+        "identity",
+        "approval-store"
+      ],
+      "proof_of_completion": "preuve de l’approbation et de sa portée"
+    },
+    {
+      "id": "LENA-07",
+      "slug": "value-time-cost-optimization",
+      "domain": "Gouvernance",
+      "purpose": "Arbitrer qualité, délai, coût et probabilité de succès selon l’intérêt de Francis.",
+      "output": "Recommandation chiffrée et ordre d’exécution.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "metrics"
+      ],
+      "proof_of_completion": "hypothèses et sensibilité visibles"
+    },
+    {
+      "id": "LENA-08",
+      "slug": "receipts-rollback-and-postmortem",
+      "domain": "Gouvernance",
+      "purpose": "Produire preuves, sauvegardes, rollback, validation et post-mortem.",
+      "output": "Reçu d’exécution complet.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "artifact-store",
+        "logs"
+      ],
+      "proof_of_completion": "tests, résultat réel et risque résiduel"
+    },
+    {
+      "id": "LENA-09",
+      "slug": "project-controls",
+      "domain": "Projet électrique",
+      "purpose": "Maintenir portée, budget, échéancier, responsables, dépendances et statut.",
+      "output": "Tableau de contrôle projet.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "project-system"
+      ],
+      "proof_of_completion": "écarts mesurés et responsables identifiés"
+    },
+    {
+      "id": "LENA-10",
+      "slug": "schedule-and-critical-path",
+      "domain": "Projet électrique",
+      "purpose": "Construire et analyser échéancier, contraintes, chemin critique et scénarios de rattrapage.",
+      "output": "Échéancier logique et plan de récupération.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "schedule-data"
+      ],
+      "proof_of_completion": "dépendances et marges validées"
+    },
+    {
+      "id": "LENA-11",
+      "slug": "labour-and-resource-planning",
+      "domain": "Projet électrique",
+      "purpose": "Planifier main-d’œuvre, équipes, quarts, accès, équipement et productivité.",
+      "output": "Plan de ressources par période.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "field-data"
+      ],
+      "proof_of_completion": "capacité comparée à la demande"
+    },
+    {
+      "id": "LENA-12",
+      "slug": "procurement-and-long-lead",
+      "domain": "Projet électrique",
+      "purpose": "Suivre achats, approbations, fabrication, livraison et risques de long délai.",
+      "output": "Registre d’approvisionnement.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "supplier-data"
+      ],
+      "proof_of_completion": "date requise vs date promise"
+    },
+    {
+      "id": "LENA-13",
+      "slug": "field-coordination",
+      "domain": "Projet électrique",
+      "purpose": "Coordonner contraintes terrain, séquences, accès, conflits et fronts de travail.",
+      "output": "Plan de coordination chantier.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "field-data",
+        "communications"
+      ],
+      "proof_of_completion": "blocages fermés avec preuve"
+    },
+    {
+      "id": "LENA-14",
+      "slug": "deficiencies-commissioning-and-tests",
+      "domain": "Projet électrique",
+      "purpose": "Gérer déficiences, essais, mise en service, acceptation et preuves.",
+      "output": "Dossier d’essais et fermeture.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "test-records"
+      ],
+      "proof_of_completion": "résultat attendu comparé au résultat observé"
+    },
+    {
+      "id": "LENA-15",
+      "slug": "rfi-submittals-and-change-management",
+      "domain": "Projet électrique",
+      "purpose": "Préparer RFI, dessins d’atelier, directives, changements, impacts et réserves.",
+      "output": "Dossier de changement traçable.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "documents",
+        "email"
+      ],
+      "proof_of_completion": "coût, délai et autorité reliés"
+    },
+    {
+      "id": "LENA-16",
+      "slug": "stakeholder-and-trade-coordination",
+      "domain": "Projet électrique",
+      "purpose": "Aligner client, ingénieurs, architectes, sous-traitants, fournisseurs et chantier.",
+      "output": "Matrice d’interfaces et actions.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "contacts",
+        "communications"
+      ],
+      "proof_of_completion": "propriétaire et échéance pour chaque interface"
+    },
+    {
+      "id": "LENA-17",
+      "slug": "closeout-and-turnover",
+      "domain": "Projet électrique",
+      "purpose": "Assembler plans tels que construits, manuels, garanties, formations et acceptations.",
+      "output": "Index de fermeture contractuelle.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "document-store"
+      ],
+      "proof_of_completion": "chaque exigence possède une preuve"
+    },
+    {
+      "id": "LENA-18",
+      "slug": "plan-and-specification-review",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Analyser plans, devis, addendas, contradictions, exclusions et quantités.",
+      "output": "Revue annotée et liste d’écarts.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "document-vision"
+      ],
+      "proof_of_completion": "référence page/détail pour chaque constat"
+    },
+    {
+      "id": "LENA-19",
+      "slug": "codes-standards-and-jurisdiction-research",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Rechercher normes, code électrique du Québec, exigences locales et interprétations applicables.",
+      "output": "Note de conformité sourcée.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "official-research"
+      ],
+      "proof_of_completion": "édition, article et juridiction confirmés"
+    },
+    {
+      "id": "LENA-20",
+      "slug": "electrical-calculation-assistance",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Assister les calculs de charge, chute de tension, court-circuit, protection et capacité sans remplacer le sceau professionnel.",
+      "output": "Calcul reproductible et hypothèses.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "calculation-engine"
+      ],
+      "proof_of_completion": "unités, formules et vérification indépendante"
+    },
+    {
+      "id": "LENA-21",
+      "slug": "quantity-takeoff",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Extraire et normaliser quantités par système, zone, plan, révision et confiance.",
+      "output": "Bordereau de quantités auditables.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "document-vision",
+        "takeoff-tools"
+      ],
+      "proof_of_completion": "quantité reliée à sa source"
+    },
+    {
+      "id": "LENA-22",
+      "slug": "labour-units-and-ccq-estimating",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Appliquer unités de main-d’œuvre, conditions, taux CCQ, charges et productivité DR.",
+      "output": "Estimation heures/coût par poste.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "estimating-data"
+      ],
+      "proof_of_completion": "source, édition et facteur documentés"
+    },
+    {
+      "id": "LENA-23",
+      "slug": "bid-and-quote-normalization",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Comparer soumissions et prix sur une portée commune avec exclusions et risques.",
+      "output": "Tableau comparatif normalisé.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "supplier-quotes"
+      ],
+      "proof_of_completion": "écarts de portée explicités"
+    },
+    {
+      "id": "LENA-24",
+      "slug": "technical-product-compliance",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Vérifier compatibilité, certification, fiches techniques, substitutions et disponibilité.",
+      "output": "Matrice de conformité produit.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "manufacturer-data"
+      ],
+      "proof_of_completion": "modèle exact et preuve primaire"
+    },
+    {
+      "id": "LENA-25",
+      "slug": "historical-estimate-calibration",
+      "domain": "Ingénierie et estimation",
+      "purpose": "Comparer estimation, achats, heures et coût réel pour recalibrer les facteurs.",
+      "output": "Boucle d’apprentissage d’estimation.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "historical-costs"
+      ],
+      "proof_of_completion": "écart et cause racine mesurés"
+    },
+    {
+      "id": "LENA-26",
+      "slug": "email-analysis-and-chronology",
+      "domain": "Documents et communications",
+      "purpose": "Rechercher, relier et résumer courriels, pièces jointes, décisions et chronologie.",
+      "output": "Chronologie sourcée et brouillon de réponse.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "email",
+        "attachments"
+      ],
+      "proof_of_completion": "message et date reliés à chaque fait"
+    },
+    {
+      "id": "LENA-27",
+      "slug": "meetings-minutes-and-actions",
+      "domain": "Documents et communications",
+      "purpose": "Préparer réunion, analyser audio/transcription, produire minutes, décisions et actions.",
+      "output": "Compte rendu avec responsables.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "audio",
+        "calendar",
+        "documents"
+      ],
+      "proof_of_completion": "distinction parole, décision et interprétation"
+    },
+    {
+      "id": "LENA-28",
+      "slug": "evidence-dossier-and-claims",
+      "domain": "Documents et communications",
+      "purpose": "Assembler faits, preuves favorables/contradictoires, lacunes et chaîne de provenance.",
+      "output": "Dossier de preuve structuré.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "document-store",
+        "claim-store"
+      ],
+      "proof_of_completion": "chaque claim est relié à une preuve"
+    },
+    {
+      "id": "LENA-29",
+      "slug": "document-and-revision-control",
+      "domain": "Documents et communications",
+      "purpose": "Contrôler versions, hashes, révisions, approbations, statut et supersession.",
+      "output": "Registre documentaire canonique.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "document-store"
+      ],
+      "proof_of_completion": "une source de vérité par révision"
+    },
+    {
+      "id": "LENA-30",
+      "slug": "multimodal-analysis",
+      "domain": "Documents et communications",
+      "purpose": "Analyser PDF, image, photo, dessin, audio et tableau avec contrôle visuel.",
+      "output": "Extraction structurée avec confiance.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "vision",
+        "audio"
+      ],
+      "proof_of_completion": "zones illisibles signalées; aucune invention"
+    },
+    {
+      "id": "LENA-31",
+      "slug": "executive-and-operational-reporting",
+      "domain": "Documents et communications",
+      "purpose": "Produire rapports direction, chantier, risques, décisions et actions adaptés au lecteur.",
+      "output": "Rapport prêt à décider.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "project-data"
+      ],
+      "proof_of_completion": "chiffres rapprochés et actions nettes"
+    },
+    {
+      "id": "LENA-32",
+      "slug": "commercial-and-legal-issue-spotting",
+      "domain": "Documents et communications",
+      "purpose": "Repérer impacts contractuels, avis, réserves, incohérences et besoins d’avis juridique.",
+      "output": "Note factuelle pour gestion ou avocat.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "contracts",
+        "evidence"
+      ],
+      "proof_of_completion": "faits séparés de l’opinion juridique"
+    },
+    {
+      "id": "LENA-33",
+      "slug": "repository-and-codebase-mapping",
+      "domain": "Ingénierie IA",
+      "purpose": "Cartographier architecture, frontières, flux, dépendances, CI et dette avant modification.",
+      "output": "Carte du code et zone de changement minimale.",
+      "minimum_privilege": "A0",
+      "required_capability_classes": [
+        "git",
+        "code-search"
+      ],
+      "proof_of_completion": "fichiers et tests pertinents identifiés"
+    },
+    {
+      "id": "LENA-34",
+      "slug": "branch-worktree-and-change-isolation",
+      "domain": "Ingénierie IA",
+      "purpose": "Créer sauvegarde, branche/worktree et commits atomiques sans contaminer main.",
+      "output": "Espace de développement isolé.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "git"
+      ],
+      "proof_of_completion": "SHA de départ et rollback disponibles"
+    },
+    {
+      "id": "LENA-35",
+      "slug": "implementation-and-refactoring",
+      "domain": "Ingénierie IA",
+      "purpose": "Implémenter ou refactorer en respectant les frontières du dépôt et les contrats.",
+      "output": "Code maintenable et migration progressive.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "editor",
+        "runtime"
+      ],
+      "proof_of_completion": "diff minimal et compatibilité contrôlée"
+    },
+    {
+      "id": "LENA-36",
+      "slug": "testing-lint-build-and-review",
+      "domain": "Ingénierie IA",
+      "purpose": "Exécuter tests, lint, typecheck, build, tests négatifs et revue de sécurité.",
+      "output": "Rapport de validation reproductible.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "ci",
+        "runtime"
+      ],
+      "proof_of_completion": "commandes terminées sans erreur"
+    },
+    {
+      "id": "LENA-37",
+      "slug": "agent-profiles-skills-and-mcp-routing",
+      "domain": "Ingénierie IA",
+      "purpose": "Composer persona légère, skills progressifs, outils MCP réels et permissions minimales.",
+      "output": "Agent outillé sans gonfler le prompt.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "openhands",
+        "mcp"
+      ],
+      "proof_of_completion": "outil réellement disponible et scope déclaré"
+    },
+    {
+      "id": "LENA-38",
+      "slug": "verified-webhook-ingress",
+      "domain": "Ingénierie IA",
+      "purpose": "Recevoir webhooks, vérifier signature, anti-rejeu, limites et enveloppe canonique.",
+      "output": "Événement authentifié et normalisé.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "cloudflare-worker"
+      ],
+      "proof_of_completion": "tests signature valide/invalide"
+    },
+    {
+      "id": "LENA-39",
+      "slug": "durable-edge-queue-processing",
+      "domain": "Ingénierie IA",
+      "purpose": "Découpler réception et traitement avec file, retries, idempotence et dead-letter queue.",
+      "output": "Pipeline asynchrone résilient.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "cloudflare-queues"
+      ],
+      "proof_of_completion": "duplication et panne simulées"
+    },
+    {
+      "id": "LENA-40",
+      "slug": "supabase-control-plane-and-governance",
+      "domain": "Ingénierie IA",
+      "purpose": "Modéliser tenants, événements, sources, claims, mémoire, approbations et reçus avec RLS.",
+      "output": "Schéma gouverné et migrations versionnées.",
+      "minimum_privilege": "A3",
+      "required_capability_classes": [
+        "supabase"
+      ],
+      "proof_of_completion": "preview branch + tests allow/deny avant production"
+    },
+    {
+      "id": "LENA-41",
+      "slug": "source-registry-and-canonical-ingestion",
+      "domain": "Données et RAG",
+      "purpose": "Enregistrer identité, hash, révision, portée, provenance et contenu brut immuable.",
+      "output": "Corpus canonique dédupliqué.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "storage",
+        "supabase"
+      ],
+      "proof_of_completion": "hash et supersession validés"
+    },
+    {
+      "id": "LENA-42",
+      "slug": "hybrid-rag-claims-and-memory",
+      "domain": "Données et RAG",
+      "purpose": "Combiner lexical, vecteur, filtres, reranking, claims, contradictions et promotion de mémoire.",
+      "output": "Réponse sourcée et mémoire contrôlée.",
+      "minimum_privilege": "A2",
+      "required_capability_classes": [
+        "embedding-service",
+        "supabase"
+      ],
+      "proof_of_completion": "recall/precision et staleness mesurés"
+    },
+    {
+      "id": "LENA-43",
+      "slug": "observability-model-and-daily-stack-scorecard",
+      "domain": "Données et RAG",
+      "purpose": "Mesurer qualité, coût, latence, modèle demandé/réel, erreurs, dérive et expérience quotidienne de la veille IA.",
+      "output": "Scorecard et recommandation de routage.",
+      "minimum_privilege": "A1",
+      "required_capability_classes": [
+        "telemetry",
+        "daily-stack-report"
+      ],
+      "proof_of_completion": "baseline, résultat, rollback et décision consignés"
+    }
+  ]
+}

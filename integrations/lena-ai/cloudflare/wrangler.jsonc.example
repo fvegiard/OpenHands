@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lena-webhook-gateway",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-09-01",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "WEBHOOK_MAX_SKEW_SECONDS": "300",
+    "MAX_BODY_BYTES": "1048576",
+    "MAX_QUEUE_MESSAGE_BYTES": "100000",
+    "LENA_ORGANIZATION_ID": "replace-with-an-existing-organization-uuid",
+    "SUPABASE_INGEST_URL": "https://replace.supabase.co/rest/v1/rpc/ingest_lena_event"
+  },
+  "r2_buckets": [
+    {
+      "binding": "LENA_WEBHOOK_RAW",
+      "bucket_name": "lena-webhook-raw"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "LENA_EVENTS",
+        "queue": "lena-events"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "lena-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 60,
+        "dead_letter_queue": "lena-events-dlq"
+      }
+    ]
+  }
+}
