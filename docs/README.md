@@ -4,6 +4,7 @@ This directory contains the project documentation.
 
 - [Architecture](./architecture.md): system boundaries, runtime modes, and quality gates.
 - [Using ACP agents](./ACP_AGENTS.md): onboard and configure external agents (Claude Code, Codex, Gemini CLI).
+- [ACP agents on Windows](./ACP_WINDOWS_DEV.md): Windows spawn-bug patch, ACP version sandbox upgrades, side-by-side stacks, model selection, and MCP layers.
 - [Development guide](./DEVELOPMENT.md)
 - [Canvas Extensions manual testing](./CANVAS_EXTENSIONS_TESTING.md)
 - [Self-hosting guide](./SELF_HOSTING.md)
