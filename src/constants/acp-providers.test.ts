@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   ACP_MANAGED_SENTINEL,
   ACP_PROVIDERS,
-  buildAcpAgentSettingsDiff,
   getAcpProviderSecrets,
   SURFACED_ACP_PROVIDERS,
   resolveEffectiveAcpModel,
@@ -110,14 +109,6 @@ describe("surfaced ACP providers", () => {
   it("offers no credential fields for a harness it does not surface", () => {
     unsurfaced.forEach((key) => {
       expect(getAcpProviderSecrets(key)).toEqual([]);
-    });
-  });
-});
-
-describe("buildAcpAgentSettingsDiff", () => {
-  it("selects the permission-bypassing session mode for Claude Code", () => {
-    expect(buildAcpAgentSettingsDiff("claude-code")).toMatchObject({
-      acp_session_mode: "bypassPermissions",
     });
   });
 });

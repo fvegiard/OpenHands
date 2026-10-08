@@ -172,6 +172,9 @@ describe("ChooseAgentStep", () => {
       // command at conversation-create time.
       acp_args: [],
       acp_model: "opus[1m]",
+      // Sent explicitly so a mode saved for a previous provider can't
+      // survive the switch.
+      acp_session_mode: "bypassPermissions",
     });
   });
 
