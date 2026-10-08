@@ -509,5 +509,11 @@ export function buildAcpAgentSettingsDiff(
     // The *preferred* default (Vertex-safe for Gemini), not the raw registry
     // default — see getAcpPreferredDefaultModel.
     acp_model: getAcpPreferredDefaultModel(providerKey) ?? null,
+    // Permission-bypassing mode per the SDK registry (Claude Code:
+    // ``bypassPermissions``). Sent explicitly so a stale mode from a
+    // previous provider can't survive the switch; ``null`` (custom) lets the
+    // agent-server auto-detect.
+    acp_session_mode:
+      getClientAcpProvider(providerKey)?.default_session_mode ?? null,
   };
 }
