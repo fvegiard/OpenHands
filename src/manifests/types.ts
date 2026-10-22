@@ -155,11 +155,6 @@ export interface SetupActions {
   upload?: SetupUploadAction;
 }
 
-export type SetupAction =
-  | SetupPromptAction
-  | SetupPluginAction
-  | SetupUploadAction;
-
 export interface SetupBlock {
   version: typeof SETUP_VERSION;
   mode: SetupMode;
@@ -250,6 +245,8 @@ export interface DeploymentCapabilities {
     event?: { filterLanguage: string; filterFunctions: string[] };
   };
   features: string[];
+  /** Providers whose repositories a run clones with the user's token; older services omit it. */
+  repoProviders?: string[];
 }
 
 /** A single problem with a draft, addressed to the field that caused it. */
