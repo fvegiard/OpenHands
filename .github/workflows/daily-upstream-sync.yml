@@ -1,8 +1,6 @@
 name: Daily upstream sync
 
 on:
-  schedule:
-    - cron: '23 9 * * *'
   workflow_dispatch:
 
 permissions:
