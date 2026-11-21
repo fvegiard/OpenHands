@@ -341,8 +341,9 @@ describe("home automations composer layout", () => {
       "href",
       "/automations/auto-2",
     );
+    // "0 9 * * *" is worded by the shared schedule formatter.
     expect(
-      screen.getByText("Daily at 09:00", { exact: false }),
+      screen.getByText("AUTOMATIONS$SCHEDULE$DAILY_AT", { exact: false }),
     ).toBeInTheDocument();
   });
 
@@ -456,7 +457,9 @@ describe("home automations composer layout", () => {
     expect(
       within(dashboard).getByTestId("pinned-automation-pills-auto-1-wrap"),
     ).toBeInTheDocument();
-    expect(within(dashboard).getByText("Daily at 09:00")).toBeInTheDocument();
+    expect(
+      within(dashboard).getByText("AUTOMATIONS$SCHEDULE$DAILY_AT"),
+    ).toBeInTheDocument();
     expect(
       within(pinnedCard).getByTestId("automation-run-stats"),
     ).toBeInTheDocument();
@@ -521,8 +524,7 @@ describe("home automations composer layout", () => {
         makeRun({
           status: AutomationRunStatus.RUNNING,
           completed_at: null,
-          phase_code: "running_agent",
-          phase_label: null,
+          current_phase: "Agent is working on the task",
         }),
       ],
       total: 1,
@@ -543,9 +545,7 @@ describe("home automations composer layout", () => {
     // Assert: the pinned card shows the phase ...
     const dashboard = await screen.findByTestId("pinned-automations-dashboard");
     expect(
-      await within(dashboard).findByText(
-        "AUTOMATIONS$DETAIL$PHASE_RUNNING_AGENT",
-      ),
+      await within(dashboard).findByText("Agent is working on the task"),
     ).toBeInTheDocument();
     // ... and only one runs request was ever made for this automation.
     expect(AutomationService.getAutomationRuns).toHaveBeenCalledTimes(1);
