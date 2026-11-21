@@ -1,0 +1,15 @@
+name: Probe inputs
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Manual upstream sync trigger.
+        required: false
+        default: manual
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo probe
